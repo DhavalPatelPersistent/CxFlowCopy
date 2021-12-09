@@ -1,0 +1,182 @@
+server:
+  port: ${PORT:8080}
+
+logging:
+  file:
+    name: flow.log
+
+cx-flow:
+  # Agreed upon shared API token
+  token: 1F4QipGtiR2Ub68ABEYx
+  bug-tracker: Json
+  bug-tracker-impl:
+    - Xml
+    - Json
+    - GitLab
+  branches:
+    - develop
+    - master
+  filter-severity:
+    - Critical
+    - High
+  filter-category:
+  filter-cwe:
+  filter-status:
+    - New
+    - Confirmed
+  mitre-url: https://cwe.mitre.org/data/definitions/%s.html
+  wiki-url: https://checkmarx.atlassian.net/wiki/spaces/AS/pages/79462432/Remediation+Guidance
+  codebash-url: https://cxa.codebashing.com/courses/
+  web-hook-queue: 20
+  scan-result-queue: 8
+  break-build: false
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: xxx
+    password: xxx
+    cc: emailList1@...com, emailList2@...com
+    notification: false
+    allow-empty-mail: false
+
+checkmarx:
+  username:
+  password: xxx
+  client-secret: xxx
+  base-url: https://cx.aws.checkmarx.com
+  url: ${checkmarx.base-url}/cxrestapi
+  multi-tenant: true
+  scan-preset: Checkmarx Default
+  configuration: Default Configuration
+  team: \CxServer\SP\Machina
+  scan-timeout: 120 #Webhook and --scan command line only, number of minutes
+  jira-project-field: jira-project
+  jira-issuetype-field: jira-issuetype
+  jira-custom-field: jira-fields
+#WSDL Config
+  portal-url: ${checkmarx.base-url}/cxwebinterface/Portal/CxWebService.asmx
+
+github:
+  webhook-token: 1234
+  token: xxx
+  url: https://github.com
+  api-url: https://api.github.com/repos/
+  false-positive-label: false-positive
+  block-merge: true
+
+gitlab:
+  webhook-token: 1234
+  token: xxx
+  url: https://gitlab.com
+  api-url: https://gitlab.com/api/v4/
+  false-positive-label: false-positive
+  block-merge: true
+
+bitbucket:
+  webhook-token:
+  token: xxx
+  url: https://api.bitbucket.org
+  api-path: /2.0
+  false-positive-label: false-positive
+
+azure:
+  webhook-token: cxflow:1234
+  token: xxxx
+  url: https://dev.azure.com/XXXXXX
+  issue-type: issue
+  api-version: 5.0
+  false-positive-label: false-positive
+  block-merge: true
+  closed-status: Closed
+  open-status: Active
+
+jira:
+  url: https://xxxx.atlassian.net
+  username: xxxx
+  token: xxxx
+  project: SS
+  issue-type: Application Security Bug
+  priorities:
+    Critical: Highest
+    High: High
+    Medium: Medium
+    Low: Low
+    informational: Lowest
+  open-transition: In Review
+  close-transition: Done
+  # project-key-script:
+  open-status:
+    - To Do
+    - In Progress
+    - In Review
+  closed-status:
+    - Done
+  fields:
+#   - type: cx #[ cx | static | result ]
+#     name: Platform # cx custom field name | cwe, category, severity, application, *project*, repo-name, branch, repo-url, namespace, recommendations, loc, site, issueLink, filename, language
+#     jira-field-name: Application
+#     jira-field-type: label #[ security | text | label | single-select | multi-select ]
+    - type: result
+      name: application
+      jira-field-name: Application
+      jira-field-type: label
+    - type: result
+      name: cve
+      jira-field-name: CVEs
+      jira-field-type: label
+    - type: result
+      name: cwe
+      jira-field-name: CWEs
+      jira-field-type: label
+    - type: result
+      name: category
+      jira-field-name: Category
+      jira-field-type: label
+    - type: result
+      name: loc
+      jira-field-name: LOC
+      jira-field-type: label
+      jira-default-value: XXXXX
+  close-transition-value:
+  close-transition-field:
+
+json:
+  file-name-format: "[NAMESPACE]-[REPO]-[BRANCH]-[TIME].json"
+  data-folder: "C:\\tmp"
+
+cx-xml:
+  file-name-format: "[NAMESPACE]-[REPO]-[BRANCH]-[TIME].xml"
+  data-folder: "C:\\tmp"
+
+csv:
+  file-name-format: "[TEAM]-[PROJECT]-[TIME].csv"
+  data-folder: "C:\\tmp"
+  include-header: true
+  fields:
+    - header: Customer field (Application)
+      name: application
+      default-value: unknown
+    - header: Primary URL
+      name: static
+      default-value: ${tmp.url}
+    - header: severity
+      name: severity
+    - header: Vulnerability ID
+      name: summary
+      prefix: "[APP]:"
+    - header: file
+      name: filename
+    - header: Vulnerability ID
+      name: summary
+    - header: Vulnerability Name
+      name: category
+    - header: Category ID
+      name: cwe
+    - header: Description
+      name: summary
+      prefix: "*"
+      postfix: "*"
+    - header: Severity
+      name: severity
+    - header: recommendation
+      name: recommendation
