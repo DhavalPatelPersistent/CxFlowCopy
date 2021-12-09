@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cxflow.fullname" . }}
+  labels:
+    {{- include "cxflow.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cxflow.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cxflow.selectorLabels" . | nindent 8 }}
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8585
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: CX_FLOW_BUG_TRACKER
+              value: {{ .Values.cxflow.bugTracker | quote }}
+            - name: GITHUB_TOKEN
+              value: {{ .Values.cxflow.githubToken | quote }}
+            - name: GITHUB_WEBHOOK_TOKEN
+              value: {{ .Values.cxflow.githubWebhookToken | quote }}
+            - name: MULTI_TENANT
+              value: "true"
+            - name: JIRA_TOKEN
+              value: {{ .Values.cxflow.jiraToken | quote }}
+            - name: JIRA_URL
+              value: {{ .Values.cxflow.jiraUrl | quote }}
+            - name: JIRA_USERNAME
+              value: {{ .Values.cxflow.jiraUserName | quote }}
+            - name: JIRA_PROJECT
+              value: {{ .Values.cxflow.jiraProject | quote }}
+            - name: AZURE_TOKEN
+              value: {{ .Values.cxflow.azureToken | quote }}
+            - name: GITLAB_TOKEN
+              value: {{ .Values.cxflow.gitlabToken | quote }}
+            - name: GITLAB_CONFIG_AS_CODE
+              value: {{ .Values.cxflow.gitlabConfigAsCode | quote }}
+            - name: GITLAB_WEBHOOK_TOKEN
+              value: {{ .Values.cxflow.gitlabWebhookToken | quote }}
+            - name: CHECKMARX_TEAM
+              value: {{ .Values.cxflow.checkmarxTeam }}
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-external-secret
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}

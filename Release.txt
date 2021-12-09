@@ -1,0 +1,272 @@
+Release 1.5.4
+---------------------------------------------------------------------
+# FEATURES
+- Adding Support for Rally Defect Tracker
+# FIXES
+- Fixing false positive tracking issue with counting number of ocurrances resulting in issues not closing
+
+Release 1.5.3
+---------------------------------------------------------------------
+# FEATURES
+- Adding Checkmarx Issue comments as a checkmarx custom field option ("comment" is the type)
+- Adding support for linking Parent/GrandParent/Child issues for issue hierchy linkage
+- Adding the ability to break build status within Azure DevOps Pull Requests
+  - Using azure.error-merge: true in conjunction with auzure.block-merge: true
+
+Release 1.5.2
+---------------------------------------------------------------------
+# FEATURES
+- Adding the ability to track false positives in the feedback channels
+    - add the following block to the cx-flow config: list-false-positives: true
+    - Change JIRA resolution code with additional property under jira config block:   close-false-positive-transition-value: Declined
+
+Release 1.5.1
+---------------------------------------------------------------------
+# FIXES
+- Adding truncation of code snippets from Checkmarx (0.4.1 SDK) to protect against cases where minified JS is scanned
+- Adding truncation of description of JIRA issue to ensure the max length is never exceeded
+
+Release 1.5.0
+---------------------------------------------------------------------
+# FEATURES
+- Add support for config as code.  The repository must contain the file - cx.config in the root directory
+    - Sample config files can be found in the test resources folder and source resources/samples folder
+- Add support for Auto profiling for GitHub and GitLab
+    - The type of languages and their percentages along with files in the top directory for GitLab, and for X layers deep (default 1) for GitHub.
+    - Sample config files (default is current execution directory CxProfile.json) can be found in the test resources folder and source resources/samples folder
+
+Release 1.4.6 | 1.4.7
+---------------------------------------------------------------------
+- Bug Fixes
+
+Release 1.4.5
+---------------------------------------------------------------------
+# FEATURES
+- Add support for an updated GitHub PR (synchronize action driven by commits to branch specified within the Pull Request).
+
+Release 1.4.4
+---------------------------------------------------------------------
+
+Release 1.4.3
+---------------------------------------------------------------------
+# FEATURES
+- Support Bitbucket Server pr:merged webhook event
+
+
+Release 1.4.2
+---------------------------------------------------------------------
+# CHANGES
+- Update SDK to 0.3.2
+
+# FIXES
+- Fix ADO Pull/Push test event validation
+- Fix to namespace bug identified for BitBucket Cloud
+- Fix to vulnerability counting in Violation Summary
+
+Release 1.4.1
+---------------------------------------------------------------------
+#FEATURES
+- Add ability to provide Azure DevOps / TFS Pull Request Feedback through command line with the adopull | ADOPULL bug-tracker
+- Azure DevOps, add command line --alt-project to select a project with a different name than the Cx project/
+- Azure DevOps, add command line --alt-fields to add additional fields to each project request. Format:
+	* <field-name1>:<field-value1>,<field-name2>:<field-value2>,...
+	* Example: System.AreaPath:/Teams/DevOps
+- Azure DevOps, add custom field alt-project to set alternate project inside of portal.
+---------------------------------------------------------------------
+Release 1.4.0
+---------------------------------------------------------------------
+# FEATURES
+- CIRCLE CI Pipeline Configuration | build and deploy (GitHub Releases)
+- Azure DevOps Pipeline Configuration
+- Generic REST API Endpoint to trigger scans and post results to a provided web end point (i.e. pre-signed S3 url)
+- Allow for parent/child issue association with JIRA issues
+- Support for Checkmarx 9.0
+- Externalize configuration for Report Polling
+- Externalize configuration for Scan Polling
+
+# CHANGES
+- Checkmarx logic has been pulled into an SDK - https://github.com/checkmarx-ts/checkmarx-spring-boot-java-sdk
+- Update JRJC Atlassian Java dependencies
+---------------------------------------------------------------------
+Release 1.3.2
+---------------------------------------------------------------------
+# FEATURES
+* Ability to fail the status of a merge request in GitHub if any of the filter criteria is met (any issues are presented in the pull feedback).
+** Following configuration can be enabled under the github block for this:
+github:
+...
+  block-merge: true
+...
+* Ability to exclude files from being zipped up during the CLI scan process using the cx-flow.zip-exclude cli option, or with the following
+  configuration block using csv of regular expressions:
+cx-flow:
+...
+  zip-exclude: .*.json$, bin\/.* #Regular expression CSV
+...
+* Ability to add a prefix/postfix to both JIRA Issue Summary and Issue Description using the following configurations under the jira block:
+jira
+...
+  issue-prefix: "<PREFIX>-"
+  issue-postfix: "-<POSTFIX>"
+  description-prefix: "<PRE>-"
+  description-postfix: "-<POST>"
+...
+# FIXES
+* Fix parsing issues with the timestamp returned by Checkmarx for the latest full scan.  Checkmarx was inconsistently providing a format that would change.  The
+timestamp is now trimmed to exclude the millisecond portion, which was the value
+---------------------------------------------------------------------
+Release 1.3.1
+---------------------------------------------------------------------
+# CHANGES
+* Allow for optional and configurable JIRA comment on updating existing issues
+# Features
+* Allow for configurable http connection and read timeout settings under the cx-flow configuration block:
+cx-flow:
+...
+  http-connection-timeout: xxx #milliseconds - default 30000
+  http-read-timeout: xxx #milliseconds - default 120000
+* Introduced CLI Summary Output:
+2019-06-23 17:19:36.869  INFO 3632 --- [  scan-results1] c.c.f.s.ResultsService                    [9zxIHPWA] : ####Checkmarx Scan Results Summary####
+2019-06-23 17:19:36.869  INFO 3632 --- [  scan-results1] c.c.f.s.ResultsService                    [9zxIHPWA] : high: 32, medium: 56, low: 328, info: 4
+2019-06-23 17:19:36.869  INFO 3632 --- [  scan-results1] c.c.f.s.ResultsService                    [9zxIHPWA] : To veiw results: http://WIN-8KCMUUB70RI/CxWebClient/ViewerMain.aspx?scanid=1010215&projectid=10076
+2019-06-23 17:19:36.869  INFO 3632 --- [  scan-results1] c.c.f.s.ResultsService                    [9zxIHPWA] : ######################################
+2019-06-23 17:19:36.869  INFO 3632 --- [  scan-results1] c.c.f.s.ResultsService                    [9zxIHPWA] : Process completed Succesfully
+* Introduced option for Checkmarx Summary, CxFlow Violation Summary, Detailed Summary options for Pull/Merge feedback.
+  The header value within the comment is also configurable.  This is to allow greater flexibility as to what is presented in pull/merge comments Optional as per each repo configuration block.  i.e.:
+github:
+  webhook-token: xxxx
+  token: xxxx
+  url: https://github.com
+  api-url: https://api.github.com/repos/
+  false-positive-label: false-positive
+  block-merge: true
+  cx-summary-header: Checkmarx Scan Summary
+  cx-summary: true #default false if not provided
+  flow-summary-header: Violation Summary
+  flow-summary: true #default true if not provided
+  detailed-header: Details
+  detailed: true #default true if not provided
+* CLI Enhancements
+** Allow for git clone scan initiation using --scan option along with --github|gitlab options (NOTE: Bitbucket is not complete, but will be for next release)
+** Addition of new bug-tracker option (NONE-WAIT | none-wait), which indicates no feedback channel, but to wait for scan completion.  NOTE: NONE initiates the scan but does not wait for scan completion (async).
+** Add global Checkmarx default file/folder exclusions to apply to all projects unless overridden through webhook url param / cli param
+checkmarx:
+  ...
+  exclude-files: "*.jpg, *.gif" #comma separated
+  exclude-folders: "node_modules" #comma separated
+
+# FIXES
+* Fix for JiraService bean init failure when jira configuration block is excluded from application.yml
+* Exception is now thrown if the team is not found instead of attempting to create project under Id -1
+* Checkmarx rest api requires a leading slash for team paths, a leading backslash is added automatically if one is not present
+---------------------------------------------------------------------
+---------------------------------------------------------------------
+Release 1.3.0
+---------------------------------------------------------------------
+# CHANGES
+* Update Spring Boot to 5.1.5
+* Update Gradle Wrapper to 5.4.1
+* Removing need for a separate Command Line version JAR
+** Dockerfile updates
+** gradle.build updates
+** Application entry points were changed to accommodate
+
+# FEATURES
+* Introduced rest endpoint to retrieve latest results for a project and return JSON object
+* Introduced Azure DevOps WebHook Integration
+* Introduced ability to optionally call external groovy script to determine:
+** If a branch should be scanned (webhook) - script is passed the ScanRequest object, must return boolean
+** What the project name will be in CX - script is passed the ScanRequest object, must return String
+** What team name will be used  CX - script is passed the ScanRequest object, must return String
+cx-flow:
+...
+    branch-script: D:\\tmp\Branch.groovy
+...
+checkmarx:
+...
+    project-script: D:\\tmp\CxProject.groovy
+    team-script: D:\\tmp\CxTeam.groovy
+...
+* Logging enhancements - unique identifier provided to group logging events together:
+2019-06-09 08:42:12.508  INFO 20320 --- [nio-8080-exec-7] c.c.f.c.GitLabController                  [XXXXXXXX] : Validation successful
+
+#FIXES
+* Several Code Quality Changes (Sonar Lint and peer code review)
+
+#WIP
+* Initial class / service structure is in place for Azure DevOps WorkItems (TBD)
+---------------------------------------------------------------------
+Release 1.2.1
+---------------------------------------------------------------------
+# CHANGES
+* Package and Class renaming to Checkmarx / Flow
+---------------------------------------------------------------------
+Release 1.2
+---------------------------------------------------------------------
+#FEATURES
+* GitLab and GitHub Issues support has been added
+    Custom bug tracker "GitLab" and "GitHub"
+* Pull Request blocking support added for GitHub when running in WebHook mode - scans must finish in Checkmarx before merge can take place
+* Merge Request blocking support added for GitLab when running in WebHook mode - scans must finish in Checkmarx before merge can take place
+* Override Cx Project name on webhook
+* Allow for Application Defect tracking on webhook flow (branch is removed from uniqueness of issue tracking)
+---------------------------------------------------------------------
+Release 1.1
+---------------------------------------------------------------------
+#FEATURES
+* Introduce support for Custom Bug Tracker Implementations. You must create a Service bean and implement the com.checkmarx.flow.custom.IssueTracker interface
+    void init(ScanRequest request, ScanResults results) throws MachinaException;
+    void complete(ScanRequest request, ScanResults results) throws MachinaException;
+    String getFalsePositiveLabel() throws MachinaException;
+    List<Issue> getIssues(ScanRequest request) throws MachinaException;
+    Issue createIssue(ScanResults.XIssue resultIssue, ScanRequest request) throws MachinaException;
+    void closeIssue(Issue issue, ScanRequest request) throws MachinaException;
+    Issue updateIssue(Issue issue, ScanResults.XIssue resultIssue, ScanRequest request) throws MachinaException;
+    String getIssueKey(Issue issue, ScanRequest request);
+    String getXIssueKey(ScanResults.XIssue issue, ScanRequest request);
+    boolean isIssueClosed(Issue issue);
+    boolean isIssueOpened(Issue issue);
+* Introduce command line feature to trigger scans (zip) and provide Gitub Pull Request Feedback
+
+#NOTES:
+Must include entries for custom bean implementations under the cx-flow yaml block like the following
+cx-flow:
+  bug-tracker: CxXml
+  bug-tracker-impl:
+    - Xml
+    - CxXml
+    - Json
+    - GitLab
+
+bug-tracker-impl are all the available beans.  The beans must match the exact Spring Service bean name exactly.  For example, the following creates a
+bean named GitLab, which you can see is listed in bug-tracker-impl above:
+...
+@Service("GitLab")
+public class GitLabIssueTracker implements IssueTracker {
+...
+---------------------------------------------------------------------
+Release 1.0.2
+---------------------------------------------------------------------
+#FIXES
+* Fix to remove spaces and special characters in batch mode team/project name that is mapped to label in JIRA, which spaces are not supported
+---------------------------------------------------------------------
+Release 1.0.1
+---------------------------------------------------------------------
+#FEATURES
+* Incremental scan support
+
+#FIXES
+* Ensure there is not an existing active scan in the queue before creating a new scan
+* BitBucket Line URLs are were different between BB Cloud and Server - this is fixed with the exception of BB Cloud references to a branch with forward slash '/'
+
+
+#NOTES
+* incremental scan support has 2 elements.
+    Number of scans since last previous full scan threshold - default 5
+    Number of days since previous full scan threshold - default 7
+* BitBucket Cloud line URL with branches that have forward slash ('/') do not work - yet.
+
+---------------------------------------------------------------------
+Release 1.0
+---------------------------------------------------------------------
+Initial Release

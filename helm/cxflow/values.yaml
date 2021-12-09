@@ -1,0 +1,62 @@
+replicaCount: 1
+
+image:
+  repository: checkmarx/cx-flow
+  pullPolicy: Always
+
+cxflow:
+  checkmarxUsername: ""
+  checkmarxPassword: ""
+  githubToken: ""
+  checkmarxTeam: '\CxServer\SP\Company\Users'
+  githubWebhookToken: ""
+  checkmarxClientSecret: ""
+  jiraToken: ""
+  jiraUrl: ""
+  jiraUserName: ""
+  jiraProject: E2E
+  bugTracker: JIRA
+  checkmarxBaseUrl: ""
+  azureToken: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: false
+  annotations: {}
+  name:
+
+podSecurityContext: {}
+
+securityContext: {}
+
+service:
+  type: NodePort
+  port: 8080
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:eu-west-1:983555762431:certificate/85997194-c948-4a86-9978-ba555d8f9354
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-2016-08
+    alb.ingress.kubernetes.io/target-type: instance
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator
+    alb.ingress.kubernetes.io/inbound-cidrs: 0.0.0.0/0
+  hosts:
+    - host: cxflow.cxflow-ci.com
+      paths:
+        - /*
+
+
+resources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
