@@ -429,6 +429,6 @@ GitLabController|	Push, Merge (TBD) event HTTP listeners
 BitbucketController|	Push event HTTP listener
 flowController|	Unused, but intended for Call-back implementation
 
-## Contributing Test
+## Contributing
 
 See [Development Operations](https://checkmarx.atlassian.net/wiki/spaces/PTS/pages/1325007123/Development+Operations) (Checkmarx employees only)
