@@ -33,6 +33,7 @@ jobs:
       with:
         project: GithubActionTest
         team: 'CxServer/DhavalPatelPersistent'
+        checkmarx_multi_tenant: true
         checkmarx_url: ${{ secrets.CHECKMARX_URL }}
         checkmarx_username: ${{ secrets.CHECKMARX_USERNAME }}
         checkmarx_password: ${{ secrets.CHECKMARX_PASSWORD }}
