@@ -28,3 +28,4 @@ jobs:
         with:
           push: true
           tags: dhavalpatelpersistent/cx-flow:latest
+          target: java8
