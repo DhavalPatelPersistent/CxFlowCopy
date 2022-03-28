@@ -32,11 +32,12 @@ jobs:
       uses: DhavalPatelPersistent/checkmarx-cxflow-github-action-copy@master
       with:
         project: GithubActionTest2
-        team: 'CxServer/DhavalPatelPersistent'
+        #team: 'CxServer/DhavalPatelPersistent'
         #checkmarx_url: ${{ secrets.CHECKMARX_URL }}
         #checkmarx_username: ${{ secrets.CHECKMARX_USERNAME }}
         #checkmarx_password: ${{ secrets.CHECKMARX_PASSWORD }}
         #checkmarx_client_secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
+        team: /CxServer/SP/ANZ/CBA-GH-POC
         checkmarx_url: 'https://cxapactrial.checkmarx.net'
         checkmarx_username: cxflowDhaval
         checkmarx_password: gk7(-W&Y42
