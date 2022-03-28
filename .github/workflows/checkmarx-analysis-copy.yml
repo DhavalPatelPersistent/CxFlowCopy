@@ -34,10 +34,13 @@ jobs:
         project: GithubActionTest2
         team: 'CxServer/DhavalPatelPersistent'
         #checkmarx_url: ${{ secrets.CHECKMARX_URL }}
-        checkmarx_url: 'http://9311-2402-3a80-c87-a0cf-a4bd-32f2-738-6868.ngrok.io'
-        checkmarx_username: ${{ secrets.CHECKMARX_USERNAME }}
-        checkmarx_password: ${{ secrets.CHECKMARX_PASSWORD }}
-        checkmarx_client_secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
+        #checkmarx_username: ${{ secrets.CHECKMARX_USERNAME }}
+        #checkmarx_password: ${{ secrets.CHECKMARX_PASSWORD }}
+        #checkmarx_client_secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
+        checkmarx_url: 'https://cxapactrial.checkmarx.net'
+        checkmarx_username: cxflowDhaval
+        checkmarx_password: gk7(-W&Y42
+        checkmarx_client_secret: 014DF517-39D1-4453-B7B3-9930C563627C
         scanners: sast
         params: --namespace=${{ github.repository_owner }} --repo-name=${{ github.event.repository.name }} --branch=${{ github.ref }} --cx-flow.filterSeverity --cx-flow.filterCategory --project
     # Upload the Report for CodeQL/Security Alerts
