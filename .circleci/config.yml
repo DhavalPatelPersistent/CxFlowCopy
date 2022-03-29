@@ -1,743 +1,424 @@
 version: 2.1
+#------------------------
+# --- REUSABLE CHUNKS ---
+# -----------------------
+orbs:
+  increment-tag: dhcs/increment-tag@0.0.82
+  slack: circleci/slack@3.4.2
+  cxflow: checkmarx-ts/cxflow@1.0.4
+  whitesource-scan: dhcs/whitesource-scan@0.0.32
 
-executors:
+env_vars: &env_vars
+  environment:
+    APP_NAME: fdr-ui # Should be same as $CIRCLE_PROJECT_REPONAME
+    # To use, $(eval $IMAGE_TAG)
+    IMAGE_TAG: &IMAGE_TAG if [ "${CIRCLE_TAG}" ]; then echo "version-$CIRCLE_TAG"; else echo "review_${CIRCLE_PROJECT_REPONAME}_br_$CIRCLE_BRANCH"; fi;
+    CIRCLE_REPOSITORY_URL: git@github.com:MESMD/fdr-ui.git
+
+    # * Configure these in the CircleCI Job *
+    # AWS_ACCESS_KEY_ID: Access key for an AWS user account that can publish to ECR
+    # AWS_DEFAULT_OUTPUT: Set to `table` for human readable display in logs
+    # AWS_DEFAULT_REGION: Region to deploy review environments to
+    # AWS_ECR_REPO_NAME: URL or Docker namespace for the Docker image
+    # AWS_SECRET_ACCESS_KEY: Secret key for an AWS user account that can publish to ECR
+    # CIRCLE_API_KEY: Key for making HTTP requests to CircleCI's API
+    # GITHUB_ACCESS_TOKEN: Access token for the user committing the Helm Chart
+    # GIT_COMMITTER_NAME: Plain language name for user committing the Helm Chart
+    # GIT_COMMITTER_EMAIL: Email address for the user committing the Helm Chart
+
+defaults: &defaults
+  working_directory: ~/repo
   docker:
-    docker:
-      - image: circleci/golang:1.9
+    - image: node:16.5-alpine
+      environment:
+        NODE_ENV: test
 
-commands: # a reusable command with parameters
-  create-github-release:
-    description: Create Github Release or Pre-Release
+add_helm_repo: &add_helm_repo
+  run:
+    name: Add Helm Repo
+    command: helm repo add cammis https://${GITHUB_ACCESS_TOKEN}:@raw.githubusercontent.com/mesmd/cammis-helm/main/
+
+infrastructure_runtime: &infrastructure_runtime
+  docker:
+    - image: 166636506311.dkr.ecr.us-west-2.amazonaws.com/mesmd-infrastructure-container:version-1.0.7
+      aws_auth:
+        aws_access_key_id: $AWS_ACCESS_KEY_ID
+        aws_secret_access_key: $AWS_SECRET_ACCESS_KEY
+  <<: *env_vars
+
+install_node: &install_node
+  run:
+    name: Install Node
+    command: |
+      apk add --repository http://dl-cdn.alpinelinux.org/alpine/v3.14/main --repository http://dl-cdn.alpinelinux.org/alpine/v3.14/community --update nodejs-current npm
+      npm install -g npm@7.17.0
+
+add_github_access_token: &add_github_access_token
+  run:
+    name: Add GITHUB_ACCESS_TOKEN
+    command: echo "//npm.pkg.github.com/:_authToken=${GITHUB_ACCESS_TOKEN}" > ~/.npmrc
+
+install_npm_packages: &install_npm_packages
+  run:
+    name: Install Node Packages
+    command: npm install
+
+build_app_dist: &build_app_dist
+  run:
+    name: Build Application Distribution
+    command: |
+      npm run build -- --production
+      sed -i -e 's#/root/project/#/app/#g' .fusion/dist/production/server/server-main.js
+
+build_docker_image: &build_docker_image
+  run:
+    name: Build Docker image
+    command: docker build -t $AWS_ECR_REPO_NAME:$(eval $IMAGE_TAG) -t $AWS_ECR_REPO_NAME:commit-${CIRCLE_SHA1} --build-arg GITHUB_ACCESS_TOKEN=${GITHUB_ACCESS_TOKEN} --build-arg NODE_ENV=production .
+
+branch_commits_and_tags: &branch_commits_and_tags
+  filters:
+    tags:
+      only: /^\d+\.\d+\.\d+(\-.*)?$/
+
+install_git: &install_git
+  - run:
+      name: Install Git
+      command: apk add git
+
+publish_docker_image: &publish_docker_image
+  run:
+    name: Publish Docker image
+    command: |
+      $(aws ecr get-login --region $AWS_DEFAULT_REGION --no-include-email )
+      docker push $AWS_ECR_REPO_NAME:$(eval $IMAGE_TAG)
+      docker push $AWS_ECR_REPO_NAME:commit-${CIRCLE_SHA1}
+
+trigger_review_env: &trigger_review_env
+  run:
+    name: If review build, trigger a review-environment deploy
+    command: |
+      if [ "${CIRCLE_BRANCH}" ] ; then  # Not for tag builds
+        REVIEW_ENV_NAME=$(eval $IMAGE_TAG)
+        MASTER_CHART_NAME=fdr-build # umbrella chart - default is cammis
+        #MASTER_CHART_VERSION=0.0.3-PAT-594 # default is latest
+        # helm_deploy uses IMAGE_VERSION_KEY to override the Docker image tag just for this app
+        # If not set, will deploy version in latest master chart
+        IMAGE_VERSION_KEY=fdr-ui.image.tag
+        #IMAGE_VERSION_VAL=$REVIEW_ENV_NAME # default is "commit-${CIRCLE_SHA1}"
+        PUBLISH_SERVICE=review-env-fdr-ui # external LB svc
+        APP_PORT=80 # port the LB listens on, defaults to 3000
+        echo "Calling back to CircleCI to build a Review Environment"
+        echo "Git SHA1: ${CIRCLE_SHA1}"
+        echo "Git Branch: ${CIRCLE_BRANCH}"
+        echo "Review Env: ${REVIEW_ENV_NAME}"
+        CCI_API_URL="https://circleci.com/api/v1.1/project/github/MESMD"
+        # Generate JSON doc with build parameters
+        CCI_PARAMS="{\"build_parameters\":{\"CIRCLE_JOB\":\"helm_deploy\", \
+          \"MASTER_CHART_NAME\":\"${MASTER_CHART_NAME}\", \
+          \"MASTER_CHART_VERSION\":\"${MASTER_CHART_VERSION}\", \
+          \"IMAGE_VERSION_KEY\":\"${IMAGE_VERSION_KEY}\", \
+          \"IMAGE_VERSION_VAL\":\"${IMAGE_VERSION_VAL}\", \
+          \"PUBLISH_SERVICE\":\"${PUBLISH_SERVICE}\", \
+          \"APP_PORT\":\"${APP_PORT}\", \
+          \"GIT_SHA1\":\"${CIRCLE_SHA1}\", \
+          \"GIT_REPONAME\":\"${CIRCLE_PROJECT_REPONAME}\", \
+          \"GIT_BRANCH\":\"${CIRCLE_BRANCH}\", \
+          \"REVIEW_ENV_NAME\":\"${REVIEW_ENV_NAME}\"}}"
+        curl -u ${CIRCLE_API_KEY}: -X POST \
+          --header "Content-Type: application/json" \
+          -d "${CCI_PARAMS}" \
+          ${CCI_API_URL}/CI-review-dev/tree/main
+      fi
+
+update_umbrella_chart: &update_umbrella_chart
+  run:
+    name: Update tag for umbrella chart
+    command: |
+      CCI_API_URL="https://circleci.com/api/v1.1/project/github/MESMD"
+      COMPONENT_NAME=$APP_NAME
+      echo $CIRCLE_TAG
+      COMPONENT_VERSION=$CIRCLE_TAG
+      CCI_PARAMS="{\"build_parameters\":{\"CIRCLE_JOB\":\"update_umbrella_chart\", \
+          \"COMPONENT_NAME\":\"${COMPONENT_NAME}\", \
+          \"COMPONENT_VERSION\":\"${COMPONENT_VERSION}\"}}"
+      curl -u ${CIRCLE_KEY_FDR_BUILD}: -X POST \
+          --header "Content-Type: application/json" \
+          -d "${CCI_PARAMS}" \
+          ${CCI_API_URL}/fdr-build/tree/main
+
+commands:
+  configure_helm:
+    description: "Configure Helm CLI to v2.x or v3.x"
     parameters:
-      ghr-option:
-        default: ""
+      version:
         type: string
+        default: "2"
     steps:
-      - run: |
-          go get github.com/tcnksm/ghr
-          VERSION=$(cat ./build/libs/version.txt)
-          rm ./build/libs/version.txt
-          mv build/libs/java11/repo-${VERSION}.jar build/libs/cx-flow-${VERSION}-java11.jar
-          ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -n ${VERSION} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} << parameters.ghr-option >> -delete ${VERSION} ./build/libs/
+      - run: cp /usr/local/bin/helm<< parameters.version >> /usr/local/bin/helm
 
+#------------------------
+# --- JOBS ---
+#------------------------
 
 jobs:
   build:
-    docker:
-      - image: circleci/openjdk:11-jdk
-    working_directory: ~/repo
-    environment:
-      MAVEN_OPTS: -Xmx3200m
+    <<: *defaults
+    resource_class: large
     steps:
       - checkout
-      - restore_cache:
-          key: v1-gradle-wrapper-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}
-      - restore_cache:
-          key: v1-gradle-cache-{{ checksum "build.gradle" }}
-      - run: ./gradlew clean build
-      - run: ./gradlew -b build-11.gradle --build-cache assemble
-      - run: ./gradlew -q getVersion > build/libs/version.txt
-      - save_cache:
-          paths:
-            - ~/.gradle/wrapper
-          key: v1-gradle-wrapper-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}
-      - save_cache:
-          paths:
-            - ~/.gradle/caches
-          key: v1-gradle-cache-{{ checksum "build.gradle" }}
-      - store_artifacts:
-          path: build/libs
+      - run:
+          # Added ca-certificates for store_artifacts to work
+          name: install-certificates
+          command: apk add ca-certificates
+      - <<: *install_git
+      - run:
+          name: install-test-reporter
+          command: |
+            wget -O ./cc-test-reporter https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64
+            chmod +x ./cc-test-reporter
+      - <<: *add_github_access_token
+      - run:
+          name: install-npm
+          command: npm install --unsafe-perm
+      - run:
+          name: Report Before Build
+          command: ./cc-test-reporter before-build
       - persist_to_workspace:
-          root: .
+          root: ~/repo
           paths:
-            - build/libs/*
-            - Dockerfile
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
+            - ./*
 
-  sonar:
-    docker:
-      - image: circleci/openjdk:11-jdk
+  lint:
+    <<: *defaults
+    resource_class: large
     steps:
-      - checkout
-      - run:
-          name: Analyze by SonarCloud
-          command: ./gradlew clean compileJava compileTestJava sonarqube -x test --info
-      - run:
-          name: Check Quality Gate
-          command: |
-            REPORT_PATH="/home/circleci/project/build/sonar/report-task.txt"
-            CE_TASK_ID_KEY="ceTaskId="
-            SONAR_INSTANCE="https://sonarcloud.io"
-            SLEEP_TIME=5
-            # get the compute engine task id
-            ce_task_id=$(cat $REPORT_PATH | grep $CE_TASK_ID_KEY | cut -d'=' -f2)
-            echo "Using task id of ${ce_task_id}"
-            if [ -z "$ce_task_id" ]; then
-               echo "No task id found"
-               exit 1
-            fi
-            # grab the status of the task
-            # if CANCELLED or FAILED, fail the Build
-            # if SUCCESS, stop waiting and grab the analysisId
-            wait_for_success=true
-            while [ "${wait_for_success}" = "true" ]
-            do
-              ce_status=$(curl -s -u "${SONAR_TOKEN}": "${SONAR_INSTANCE}"/api/ce/task?id=${ce_task_id} | jq -r .task.status)
-              echo "Status of SonarQube task is ${ce_status}"
-              if [ "${ce_status}" = "CANCELLED" ]; then
-                echo "SonarQube Compute job has been cancelled - exiting with error"
-                exit 504
-              fi
-              if [ "${ce_status}" = "FAILED" ]; then
-                echo "SonarQube Compute job has failed - exit with error"
-                exit 500
-              fi
-              if [ "${ce_status}" = "SUCCESS" ]; then
-                wait_for_success=false
-              fi
-              sleep "${SLEEP_TIME}"
-            done
-            ce_analysis_id=$(curl -s -u "${SONAR_TOKEN}": "${SONAR_INSTANCE}"/api/ce/task?id=$ce_task_id | jq -r .task.analysisId)
-            echo "Using analysis id of ${ce_analysis_id}"
-            # get the status of the quality gate for this analysisId
-            qg_status=$(curl -s -u "${SONAR_TOKEN}": "${SONAR_INSTANCE}"/api/qualitygates/project_status?analysisId="${ce_analysis_id}" | jq -r .projectStatus.status)
-            echo "Quality Gate status is ${qg_status}"
-            if [ "${qg_status}" != "OK" ]; then
-              echo "Quality gate is not OK - exiting with error"
-              exit 1
-            fi
-
-  docker-build:
-    executor: docker
-    steps:
-      - setup_remote_docker
       - attach_workspace:
-          at: .
-      - deploy:
-          name: Docker Build
-          command: |
-            VERSION=$(cat ./build/libs/version.txt)
-            SHA1_SHORT=${CIRCLE_SHA1::7}
-            docker login -u ${DOCKER_USER} -p ${DOCKER_PASSWORD} docker.io
-            docker build --target java8 \
-              -t ${DOCKER_REPO}:${SHA1_SHORT} \
-              -t ${DOCKER_REPO}:${VERSION}-8 \
-              -t ${DOCKER_REPO}:${VERSION} \
-              -t ${DOCKER_REPO} \
-              .
-            docker build --target java11 \
-              -t ${DOCKER_REPO}:${VERSION}-11 \
-              .
-            docker push ${DOCKER_REPO}:${SHA1_SHORT}
+          at: ~/repo
       - run:
-          name: Archive Docker images
-          command: |
-            VERSION=$(cat ./build/libs/version.txt)
-            docker save -o image-11.tar ${DOCKER_REPO}:${VERSION}-11
-            docker save -o image-8.tar ${DOCKER_REPO}:${VERSION}-8
-            docker save -o image.tar ${DOCKER_REPO}:${VERSION}
-            docker save -o latest.tar ${DOCKER_REPO}:latest
+          name: Run Lint
+          command: npm run lint
+
+  test:
+    <<: *defaults
+    parallelism: 16
+    resource_class: large
+    steps:
+      - attach_workspace:
+          at: ~/repo
+      - <<: *install_git
+      - run:
+          name: Run Tests
+          command: npm run test:ci
+      - run:
+          name: Format Test Coverage
+          command: ./cc-test-reporter format-coverage -t lcov -o tmp/codeclimate.$CIRCLE_NODE_INDEX.json coverage/lcov.info
+      - store_artifacts:
+          path: coverage/lcov-report
       - persist_to_workspace:
-          root: .
+          root: ~/repo
           paths:
-            - ./image-11.tar
-            - ./image-8.tar
-            - ./image.tar
-            - ./latest.tar
+            - tmp
 
-  deploy-cxflow:
-    executor: aws-eks/python3
-    parameters:
-      cluster-name:
-        description: |
-          Name of the EKS cluster.
-        type: string
-      chart:
-        description: |
-          Specify for installation a chart reference.
-        type: string
-      namespace:
-        default: 'default'
-        description: |
-          The kubernetes namespace that should be used.
-        type: string
-      release-name:
-        default: ''
-        description: |
-          Specify a name for the release.
-        type: string
-      version:
-        default: v3.1.1
-        description: the helm client version to install
-        type: string
-      consider-branch:
-        default: false
-        description: Should we only consider jobs running on the same branch?
-        type: boolean
-    steps:
-      - checkout
-      - aws-eks/update-kubeconfig-with-authenticator:
-          cluster-name: << parameters.cluster-name >>
-          install-kubectl: true
-      - run:
-          name: Change appVersion
-          command: |
-            sed -i "s/appVersion:[[:space:]]*.*/appVersion: '${CIRCLE_SHA1::7}'/g" ./helm/cxflow/Chart.yaml
-      - helm/install-helm-client:
-          version: << parameters.version >>
-      - run:
-          name: Install cxflow service on cluster
-          command: |
-            helm upgrade --install --atomic --create-namespace --namespace << parameters.namespace >> << parameters.release-name >> \
-              --set cxflow.githubToken=${GITHUB_TOKEN} \
-              --set cxflow.githubWebhookToken=${GITHUB_WEBHOOK_TOKEN} \
-              --set cxflow.jiraUrl=${JIRA_URL} \
-              --set cxflow.jiraUserName=${JIRA_USERNAME} \
-              --set cxflow.jiraToken=${JIRA_TOKEN} \
-              --set cxflow.jiraProject=${JIRA_PROJECT} \
-              --set cxflow.azureToken=${AZURE_TOKEN} \
-              --set cxflow.gitlabToken=${GITLAB_TOKEN} \
-              --set cxflow.gitlabConfigAsCode=${GITLAB_CONFIG_AS_CODE} \
-              --set cxflow.gitlabWebhookToken=${GITLAB_WEBHOOK_TOKEN} \
-              --set ingress.hosts[0].host=<< parameters.release-name >>.${EXTERNAL_DNS_DOMAIN} \
-              --set ingress.hosts[0].paths[0]="/*" \
-              << parameters.chart >>
-      - run:
-          name: Show running k8s objects
-          command: |
-            sleep 60
-            kubectl get all -n << parameters.namespace >>
-          when: always
-      - run:
-          name: Delete cxflow deployment
-          command: helm uninstall << parameters.release-name >> --namespace << parameters.namespace >>
-          when: on_fail
-      - run:
-          name: Delete namespace
-          command: kubectl delete namespace << parameters.namespace >>
-          when: on_fail
-
-  component-tests:
-    docker:
-      - image: "circleci/openjdk:8-jdk"
-    steps:
-      - checkout
-      - run:
-          name: Run Component Tests
-          command: ./gradlew clean componentTest --info
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-
-  e2e-tests:
-    docker:
-      - image: "circleci/openjdk:8-jdk"
-    parameters:
-      cluster-name:
-        type: string
-      namespace:
-        type: string
-      release-name:
-        type: string
-      version:
-        type: string
-    steps:
-      - checkout
-      - aws-eks/update-kubeconfig-with-authenticator:
-          cluster-name: << parameters.cluster-name >>
-          install-kubectl: true
-      - run:
-          name: Run E2E Tests
-          command: |
-            export GITHUB_HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            export ADO_HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            export GITLAB_HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            ./gradlew clean e2eTests --info -DGITHUB_target=${GITHUB_HOOK_TARGET} -DGITHUB_repo=${GITHUB_HOOK_REPO} -DGITHUB_repo_SCA=${GITHUB_HOOK_REPO_SCA} -DGITHUB_namespace=${GITHUB_HOOK_NAMESPACE} -DADO_target=${ADO_HOOK_TARGET} -DADO_repo=${ADO_HOOK_REPO} -DADO_namespace=${ADO_HOOK_NAMESPACE} -DGITLAB_target=${GITLAB_HOOK_TARGET} -DGITLAB_repo=${GITLAB_HOOK_REPO} -DGITLAB_namespace=${GITLAB_HOOK_NAMESPACE}
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - run:
-          name: Save application logs
-          command: |
-            export POD_NAME=$(kubectl get pods -o custom-columns=:metadata.name -n << parameters.namespace >> | grep cxflow | tr -d '\n')
-            mkdir -p ~/application-logs/
-            kubectl logs ${POD_NAME} -n << parameters.namespace >> > ~/application-logs/${POD_NAME}.log
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-      - store_artifacts:
-          path: ~/application-logs
-
-  integration-tests:
-    docker:
-      - image: "circleci/openjdk:8-jdk"
-    steps:
-      - checkout
-      - run:
-          name: Run Integration Tests
-          command: |
-            export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            ./gradlew clean integrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-
-  sca-integration-tests:
-    docker:
-      - image: "circleci/openjdk:8-jdk"
-    steps:
-      - checkout
-      - run:
-          name: Run SCA Integration Tests
-          command: |
-            export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            ./gradlew clean ScaIntegrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-
-  ast-integration-tests:
-    docker:
-    - image: "circleci/openjdk:8-jdk"
-    steps:
-    - checkout
-    - run:
-        name: Run AST Integration Tests
-        command: |
-          export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-          ./gradlew clean ASTIntegrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-    - run:
-        name: Save test results
-        command: |
-          mkdir -p ~/test-results/junit/
-          find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-        when: always
-    - store_test_results:
-        path: ~/test-results
-    - store_artifacts:
-        path: ~/test-results/junit
-
-  jira-integration-tests:
-    docker:
-      - image: "circleci/openjdk:8-jdk"
-    steps:
-      - checkout
-      - run:
-          name: Run Jira Integration Tests
-          command: |
-            export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            ./gradlew clean JiraIntegrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-
-  pullRequestComments-integration-tests:
-    docker:
-      - image: "circleci/openjdk:8-jdk"
-    steps:
-      - checkout
-      - run:
-          name: Run pull request comments Integration Tests
-          command: |
-            export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            ./gradlew clean PullRequestCommnetsIntegrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-
-  SAST-CLI-integration-tests:
-    docker:
-    - image: "circleci/openjdk:8-jdk"
-    steps:
-      - checkout
-      - run:
-          name: Run SAST CLI Integration Tests
-          command: |
-            export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            ./gradlew clean SastCliIntegrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-
-  SCA-CLI-integration-tests:
-    docker:
-      - image: "circleci/openjdk:8-jdk"
-    steps:
-      - checkout
-      - run:
-          name: Run SCA CLI Integration Tests
-          command: |
-            export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            ./gradlew clean ScaCliIntegrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-
-  AST-CLI-integration-tests:
-    docker:
-      - image: "circleci/openjdk:8-jdk"
-    steps:
-      - checkout
-      - run:
-          name: Run AST CLI Integration Tests
-          command: |
-            export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            ./gradlew clean AstCliIntegrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-
-  CxGo-integration-tests:
-                  docker:
-                    - image: "circleci/openjdk:8-jdk"
-                  steps:
-                    - checkout
-                    - run:
-                        name: Run CxGo Integration Tests
-                        command: |
-                          export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-                          ./gradlew clean CxGoIntegrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-                    - run:
-                        name: Save test results
-                        command: |
-                          mkdir -p ~/test-results/junit/
-                          find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-                        when: always
-                    - store_test_results:
-                        path: ~/test-results
-                    - store_artifacts:
-                        path: ~/test-results/junit
-
-  CodeBashing-integration-tests:
-    docker:
-      - image: "circleci/openjdk:8-jdk"
-    steps:
-      - checkout
-      - run:
-          name: Run CodeBashing Integration Tests
-          command: |
-            export HOOK_TARGET=https://cxflow-${CIRCLE_SHA1::7}.${EXTERNAL_DNS_DOMAIN}
-            ./gradlew clean CodeBashingIntegrationTest --info -Dtarget=${HOOK_TARGET} -Drepo=${HOOK_REPO} -Dnamespace=${HOOK_NAMESPACE}
-      - run:
-          name: Save test results
-          command: |
-            mkdir -p ~/test-results/junit/
-            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
-          when: always
-      - store_test_results:
-          path: ~/test-results
-      - store_artifacts:
-          path: ~/test-results/junit
-
-  cleanup:
-    executor: aws-eks/python3
-    parameters:
-      cluster-name:
-        type: string
-      namespace:
-        type: string
-      release-name:
-        type: string
-      version:
-        type: string
-    steps:
-      - aws-eks/update-kubeconfig-with-authenticator:
-          cluster-name: << parameters.cluster-name >>
-          install-kubectl: true
-      - helm/install-helm-client:
-          version: << parameters.version >>
-      - run:
-          name: Save application logs
-          command: |
-            export POD_NAME=$(kubectl get pods -o custom-columns=:metadata.name -n << parameters.namespace >> | grep cxflow | tr -d '\n')
-            mkdir -p ~/application-logs/
-            kubectl logs ${POD_NAME} -n << parameters.namespace >> > ~/application-logs/${POD_NAME}.log
-      - run:
-          name: Delete cxflow deployment
-          command: helm uninstall << parameters.release-name >> --namespace << parameters.namespace >>
-      - run:
-          name: Delete namespace
-          command: kubectl delete namespace << parameters.namespace >>
-      - store_artifacts:
-          path: ~/application-logs
-
-  docker-push-stable:
-    executor: docker
+  report:
+    <<: *defaults
+    resource_class: large
     steps:
       - attach_workspace:
-          at: /tmp/workspace
-      - setup_remote_docker
+          at: ~/repo
+      - <<: *install_git
       - run:
-          name: Load archived Docker images
+          name: Upload Coverage To Code Climate
           command: |
-            docker load -i /tmp/workspace/image-11.tar
-            docker load -i /tmp/workspace/image-8.tar
-            docker load -i /tmp/workspace/image.tar
-            docker load -i /tmp/workspace/latest.tar
+            ./cc-test-reporter sum-coverage tmp/codeclimate.*.json -o tmp/codeclimate.total.json
+            ./cc-test-reporter upload-coverage -i tmp/codeclimate.total.json
+
+  # This will build a Docker image, push it to an ECR, then trigger a review environment running that image.
+  # This job is triggered by pushing to a specially-named branch in GitHub
+  review_env:
+    working_directory: /app
+    <<: *infrastructure_runtime
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 19.03.13
+      - <<: *install_node
+      - <<: *add_github_access_token
+      - <<: *install_npm_packages
+      - <<: *build_app_dist
+      - <<: *build_docker_image
+      - <<: *publish_docker_image
+      - <<: *trigger_review_env
+
+  # This will retrieve the most recent Docker image, increment the tag release number,
+  #  then push the newest tag version to the repo at repo-path
+  # See Orb definition at https://circleci.com/orbs/registry/orb/dhcs/increment-tag
+  # This job is triggered by merging to the default branch in GitHub
+  increment_tag:
+    <<: *infrastructure_runtime
+    steps:
+      - setup_remote_docker:
+          version: 19.03.13
+      - increment-tag/increment-tag:
+          repo-path: github.com/mesmd/$APP_NAME.git
+          repo-name: $APP_NAME
+
+  # This will build a Docker image and push it to an ECR, then build and push a Helm chart
+  # This job is triggered by tagging the repo in GitHub
+  # The tag must be in ##.##.## format - see workflow below
+  publish_version:
+    <<: *infrastructure_runtime
+    resource_class: large
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 19.03.13
+      - configure_helm:
+          version: "3"
+      - <<: *install_node
+      - <<: *add_github_access_token
+      - <<: *install_npm_packages
+      - <<: *build_app_dist
+      - <<: *build_docker_image
+      - <<: *publish_docker_image
+      - <<: *add_helm_repo
       - run:
-          name: Publish Docker images to Docker Hub
-          command: |
-            docker login -u ${DOCKER_USER} -p ${DOCKER_PASSWORD} docker.io
-            docker push ${DOCKER_REPO}
-
-  publish-github-release:
-    docker:
-      - image: circleci/golang:1.9
-    steps:
-      - attach_workspace:
-          at: .
-      - create-github-release
-
-  publish-github-pre-release:
-    docker:
-      - image: circleci/golang:1.9
-    steps:
-      - attach_workspace:
-          at: .
-      - create-github-release:
-          ghr-option: "-prerelease "
-
-  clean-eks:
-    executor: aws-eks/python3
-    steps:
-      - aws-eks/update-kubeconfig-with-authenticator:
-          cluster-name: eks-cxflow-ci
-          install-kubectl: true
+          name: Package Helm Chart
+          command: helm_pkg.py -c helm/${APP_NAME} -v ${CIRCLE_TAG}
       - run:
-          name: Delete namespace
+          name: Pull down Helm Chart repo
           command: |
-            kubectl get ns
-            NS_TO_DELETE=$(kubectl get ns -o jsonpath="{.items[*].metadata.name}" | sed 's/default//g' | sed 's/kube-node-lease//g' | sed 's/kube-public//g' | sed 's/kube-system//g' | sed 's/nginx-kibana-ci//g')
-            echo "NS_TO_DELETE: ${NS_TO_DELETE}"
-            if [[ $NS_TO_DELETE =~ ^\ +$ ]] ;then
-              # There are no namespaces to delete (NS_TO_DELETE contain only whitespaces)
-              echo "No namespaces to delete."
-            else
-              kubectl delete namespace ${NS_TO_DELETE}
-            fi
+            git config --global user.name $GIT_COMMITTER_NAME
+            git config --global user.email $GIT_COMMITTER_EMAIL
+            git clone https://${GITHUB_ACCESS_TOKEN}@github.com/mesmd/cammis-helm.git
+      - run:
+          name: Publish Helm Chart
+          command: |
+            git -C cammis-helm pull
+            mv helm/${APP_NAME}/${APP_NAME}-${CIRCLE_TAG}.tgz cammis-helm/.
+            helm repo index cammis-helm
+            git -C cammis-helm add .
+            git -C cammis-helm commit -m "Added ${APP_NAME}:$(eval $TAG)"
+            git -C cammis-helm push
+      - <<: *update_umbrella_chart
 
-orbs:
-  aws-eks: circleci/aws-eks@1.0.0
-  kubernetes: circleci/kubernetes@0.4.0
-  helm: circleci/helm@0.2.3
-  checkmarx: checkmarx/circleci-kpi-shipper@0.10.0
+  # This will start a WhiteSource Scan job for the checked out repo and then update results to WhiteSource Dashboard
+  # The repo will be scanned according to the set config in wss-unified-agent-project.config file
+  # WhiteSource scan will be executed as a separate job
+  scan-project:
+    <<: *defaults
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: true
+          version: 19.03.13
+      - whitesource-scan/whitesource-project-scan:
+          whitesource_api_key: ${WHITESOURCE_API_KEY}
+          whitesource_project_scan_config: .whitesource-conf/wss-unified-agent-project-scan.config
+      - store_artifacts:
+          path: ./whitesource
+      - slack/notify:
+          message: "WhiteSource project scan has been completed for fdr-ui. The results can be viewed on whitesource"
+          webhook: ${SLACK_WEBHOOK}
+
+  scan-container:
+    <<: *defaults
+    <<: *env_vars
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: true
+          version: 19.03.13
+      - whitesource-scan/whitesource-container-scan:
+          whitesource_api_key: ${WHITESOURCE_API_KEY}
+          whitesource_container_scan_config: .whitesource-conf/wss-unified-agent-docker-scan.config
+          remote_docker_version: "19.03.13"
+          aws_region: ${AWS_DEFAULT_REGION}
+          image_tag: $(eval $IMAGE_TAG)
+      - store_artifacts:
+          path: ./whitesource
+      - slack/notify:
+          message: "WhiteSource container scan has been completed for fdr-ui. The results can be viewed on whitesource"
+          webhook: ${SLACK_WEBHOOK}
+
+  cx-scan:
+    executor: cxflow/default
+    steps:
+      - checkout
+      - cxflow/scan:
+          preset: Checkmarx Express
+          report-file: checkmarx.json
+          project: fdr-ui
+          team: CxServer/Service Providers/DHCS/MES
+          version: "9.2"
+          scan-timeout: 30
+      - store_artifacts:
+          path: checkmarx.json
+
+#------------------------
+# --- WORKFLOWS ---
+#------------------------
+
+# This workflow will run the "test" job on any git branch-push.
+# It will run the "review_env" job only on push to a review-env branch.
+# For a tag push, the branch info is empty, and vice-versa.
+# The "test" job must have a "tags" filter if any dependent jobs do.
+# The "publish_version" job will only execute on tag pushes and will requires test to be executed successfully
 
 workflows:
   version: 2
-
-  cx-kpi-shipper:
-      jobs:
-        - checkmarx/circleci-kpi-shipper
-
-  build_deploy:
+  build-and-test:
     jobs:
-      - build
-      - docker-build:
+      - build:
+          <<: *branch_commits_and_tags
+      - lint:
           requires:
             - build
-          filters:
-            branches:
-              only:
-                - master
-                - develop
-                - /pr-.*/
-                - /pr .*/
-      - component-tests:
+          <<: *branch_commits_and_tags
+      - test:
           requires:
             - build
-      - deploy-cxflow:
-          cluster-name: eks-cxflow-ci
-          chart: ./helm/cxflow
-          namespace: cxflow-${CIRCLE_SHA1::7}
-          release-name: cxflow-${CIRCLE_SHA1::7}
-          version: v3.3.4
+          <<: *branch_commits_and_tags
+      - report:
+          requires:
+            - test
+          <<: *branch_commits_and_tags
+      - review_env:
+          requires:
+            - test
           filters:
             branches:
               only:
-                - master
-                - develop
-                - /pr-.*/
-                - /pr .*/
-          requires:
-            - docker-build
-            - component-tests
-      - e2e-tests:
-          cluster-name: eks-cxflow-ci
-          namespace: cxflow-${CIRCLE_SHA1::7}
-          release-name: cxflow-${CIRCLE_SHA1::7}
-          version: v3.2.1
+                - /^r_.+$/
+      - increment_tag:
           filters:
             branches:
-              only:
-                - master
-                - develop
-                - /pr-.*/
-                - /pr .*/
+              only: main
+      - publish_version:
           requires:
-            - deploy-cxflow
-      - integration-tests:
-          requires:
-            - deploy-cxflow
-      - sca-integration-tests:
-          requires:
-            - deploy-cxflow
-      - jira-integration-tests:
-          requires:
-            - deploy-cxflow
-      - pullRequestComments-integration-tests:
-          requires:
-            - deploy-cxflow
-      - SAST-CLI-integration-tests:
-          requires:
-            - deploy-cxflow
-      - SCA-CLI-integration-tests:
-          requires:
-            - deploy-cxflow
-      - CxGo-integration-tests:
-          requires:
-            - deploy-cxflow
-      - CodeBashing-integration-tests:
-          requires:
-            - deploy-cxflow
-      - publish-github-pre-release:
+            - test
+            - lint
           filters:
             branches:
-              only: develop
+              ignore: /.*/
+            tags:
+              only: /^\d+\.\d+\.\d+(\-.*)?$/
+      - scan-container:
           requires:
-            - e2e-tests
-            - integration-tests
-            - sca-integration-tests
-            - jira-integration-tests
-            - pullRequestComments-integration-tests
-            - SAST-CLI-integration-tests
-            - SCA-CLI-integration-tests
-            - CxGo-integration-tests
-            - CodeBashing-integration-tests
-      - docker-push-stable:
+            - publish_version
           filters:
             branches:
-              only: master
-          requires:
-            - e2e-tests
-            - integration-tests
-            - sca-integration-tests
-            - jira-integration-tests
-            - pullRequestComments-integration-tests
-            - SAST-CLI-integration-tests
-            - CxGo-integration-tests
-            - CodeBashing-integration-tests
-      - publish-github-release:
-          filters:
-            branches:
-              only: master
-          requires:
-            - e2e-tests
-            - integration-tests
-            - sca-integration-tests
-            - jira-integration-tests
-            - pullRequestComments-integration-tests
-            - SAST-CLI-integration-tests
-            - SCA-CLI-integration-tests
-            - CxGo-integration-tests
-            - CodeBashing-integration-tests
-      - cleanup:
-          cluster-name: eks-cxflow-ci
-          namespace: cxflow-${CIRCLE_SHA1::7}
-          release-name: cxflow-${CIRCLE_SHA1::7}
-          version: v3.3.4
-          filters:
-            branches:
-              only:
-                - master
-                - develop
-                - /pr-.*/
-                - /pr .*/
-          requires:
-            - e2e-tests
-            - integration-tests
-            - sca-integration-tests
-            - jira-integration-tests
-            - pullRequestComments-integration-tests
-            - SAST-CLI-integration-tests
-            - SCA-CLI-integration-tests
-            - CxGo-integration-tests
-            - CodeBashing-integration-tests
-  nightly-cleanup:
-    triggers:
-      - schedule:
-          cron: "00 01 * * *"
-          filters:
-            branches:
-              only: develop
+              ignore: /.*/
+            tags:
+              only: /^\d+\.\d+\.\d+(\-.*)?$/
+  scan:
     jobs:
-      - clean-eks
+      - scan-project:
+          filters:
+            branches:
+              only:
+               - main
+               - /^hotfix-.+$/
+      - cx-scan:
+          filters:
+            branches:
+              only:
+                - main
+                - /^hotfix-.+$/
