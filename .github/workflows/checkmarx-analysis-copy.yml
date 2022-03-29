@@ -32,11 +32,16 @@ jobs:
       uses: DhavalPatelPersistent/checkmarx-cxflow-github-action-copy@master
       with:
         project: GithubActionTest2
-        team: 'CxServer/DhavalPatelPersistent'
-        checkmarx_url: ${{ secrets.CHECKMARX_URL }}
-        checkmarx_username: ${{ secrets.CHECKMARX_USERNAME }}
-        checkmarx_password: ${{ secrets.CHECKMARX_PASSWORD }}
-        checkmarx_client_secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
+        #team: 'CxServer/DhavalPatelPersistent'
+        #checkmarx_url: ${{ secrets.CHECKMARX_URL }}
+        #checkmarx_username: ${{ secrets.CHECKMARX_USERNAME }}
+        #checkmarx_password: ${{ secrets.CHECKMARX_PASSWORD }}
+        #checkmarx_client_secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
+        team: /CxServer/SP/ANZ/CBA-GH-POC
+        checkmarx_url: 'https://cxapactrial.checkmarx.net'
+        checkmarx_username: cxflowDhaval
+        checkmarx_password: gk7(-W&Y42
+        checkmarx_client_secret: 014DF517-39D1-4453-B7B3-9930C563627C
         scanners: sast
         params: --namespace=${{ github.repository_owner }} --repo-name=${{ github.event.repository.name }} --branch=${{ github.ref }} --cx-flow.filterSeverity --cx-flow.filterCategory
     # Upload the Report for CodeQL/Security Alerts
