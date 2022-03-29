@@ -24,6 +24,7 @@
     * [Wget Script](#adopipelinewget)
 * [Bitbucket Cloud Webhook Tutorial](#bitbucket)
     * [Prep](#bitbucketprep)
+* [CircleCI](#CircleCI)
 * [CxFlow CLI & JIRA Tutorial](#clijira)
     * [Prep](#cliprep)
     * [Triggering CLI Scans with CxFlow](#clitriggering)
@@ -38,6 +39,10 @@
     * [General Procedure](#IASTgeneralprocedures)
     * [Sample Jenkins Pipeline](#IASTJenkinsPipeline)
     * [Yaml - application.yml file](#IASTYaml)
+* [CxFlow SonarQube Integration](#SonarQubeIntegrations)
+* [CxSAST Branching Project](#branchedProject)
+    * [Steps to create branched project](#stepsForBranchProject)
+
 <br/>
 
 
@@ -782,6 +787,74 @@ This tutorial is designed to teach the following topics:
 
 ##### [Top of Tutorial](#bitbucket)
 
+## <a name="CircleCI">CircleCI</a>
+[Back to Table of Contents](#tableofcontents)
+<br/>
+CircleCI can be configured with CxFlow.
+<br/>Checkmarx CxFlow Orb can be used to simplify your configuration.
+<br/>Checkmarx CxFlow Orb for executing Checkmarx Scans and Publishing results to various feedback channels.
+<br/>Additional information regarding Checkmarx can be found here: https://checkmarx.atlassian.net/wiki/spaces/KC/overview
+<br/>Additional information regarding CxFlow can be found here: https://github.com/checkmarx-ltd/cx-flow/wiki
+
+### Configuration
+##### Environment Variables
+The following Environment Variables must be set within your CircleCI project for this orb to function:
+
+<br/> **CHECKMARX_URL**: High level dns entry for the Checkmarx Instance including protocol/port (i.e. https://cxsast.example.com)
+<br/> **CHECKMARX_USERNAME**: Service Account within Checkmarx that will be used for triggering scans and retrieving results
+<br/> **CHECKMARX_PASSWORD**: Password of the Service Account.
+<br/> **CHECKMARX_CLIENT_SECRET**: Client secret key associated with your Checkmarx SAST account
+<br/> **AST_CLIENT_ID**: Service account Client ID for Checkmarx AST
+<br/> **AST_CLIENT_SECRET**: Client secret key associated with your Checkmarx AST account
+<br/> **SCA_USERNAME**: Service Account within Checkmarx SCA that will be used for triggering scans and retrieving results
+<br/> **SCA_PASSWORD**: Password of the Checkmarx SCA Service Account
+<br/> **SCA_TENANT**: Tenant information of the Checkmarx SCA account
+<br/> **CXGO_CLIENT_SECRET**: Client secret key associated with your Checkmarx CxGo account
+
+##### Sample config.yml
+Below is sample config.yml for CircleCI using Checkmarx CxFlow Orb
+```
+jobs:
+  cx-scan:
+    executor: cxflow/default
+    steps:
+      - checkout
+      - cxflow/scan:
+          preset: Checkmarx Express
+          report-file: checkmarx.json
+          scanners: 'sast'
+          team: /CxServer
+          version: '9.4'
+          incremental: false
+          params: '--cx-flow.thresholds.High=0 --cx-flow.thresholds.Medium=0'
+      - store_artifacts:
+          path: checkmarx.json
+orbs:
+  cxflow: checkmarx-ts/cxflow@1.0.5
+version: 2.1
+workflows:
+  sast-scan:
+    jobs:
+      - cx-scan:
+          filters:
+            branches:
+              only: master
+  version: 2
+```
+
+As shown in above sample file, additional parameters can be passed in cxflow using params attribute.
+Thresholds for High Issue is passed as '--cx-flow.thresholds.High=0' inside 'params' attribute in sample config.yml.
+
+##### References
+* Checkmarx CxFlow Orb Readme
+  <br>https://github.com/checkmarx-ts/checkmarx-cxflow-orb#readme
+
+* Checkmarx CxFlow Orb Documentation
+  <br>https://circleci.com/developer/orbs/orb/checkmarx-ts/cxflow
+
+* Orb Introduction
+  <br>https://circleci.com/docs/2.0/orb-intro/?section=configuration
+
 ## <a name="clijira">CxFlow CLI & JIRA Tutorial</a>
 * [Prep](#cliprep)
 * [Triggering CLI Scans with CxFlow](#clitriggering)
@@ -1319,6 +1392,62 @@ jobs:
 --cx-flow.filter-state=Confirmed,Urgent
 ```
 
+### Create a workflow without using config-as-code
+<br>Configure Jira Parameter in workflow yml file instead of cx.config.     
+<br>Here is a complete main.yml working example with GitHub Secrets. Notice the top section with the name of the workflow and the triggers configuration and also the bottom parameters.
+```yaml
+# This workflow is to automate Checkmarx SAST scans.  It runs on a push to the main branch.
+#
+# The following GitHub Secrets must be first defined:
+#   - CHECKMARX_URL
+#   - CHECKMARX_USER
+#   - CHECKMARX_PASSWORD
+#   - CHECKMARX_CLIENT_SECRET
+#
+# The following variables must be inserted below:
+#   - <ProjectName>
+#
+# Update the 'team' field to reflect the team name used in Checkmarx.
+#
+# For full documentation, including a list of all inputs, please refer to the README https://github.com/checkmarx-ts/checkmarx-cxflow-github-action
+
+name: Checkmarx SAST Scan
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Checkmarx CxFlow Action
+        uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.4 #Github Action version
+        with:
+          project: ${{ secrets.CHECKMARX_PROJECT }} # <-- Insert Checkmarx SAST Project Name
+          team: ${{ secrets.CHECKMARX_TEAMS }}
+          checkmarx_url: ${{ secrets.CHECKMARX_URL }} # To be stored in GitHub Secrets.
+          checkmarx_username: ${{ secrets.CHECKMARX_USER }} # To be stored in GitHub Secrets.
+          checkmarx_password: ${{ secrets.CHECKMARX_PASSWORD }} # To be stored in GitHub Secrets.
+          checkmarx_client_secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }} # To be stored in GitHub Secrets.
+          break_build: false
+          scanners: sast
+          bug_tracker: JIRA
+          jira_url: ${{ secrets.JIRA_URL }}
+          jira_username: ${{ secrets.JIRA_USERNAME }}
+          jira_token: ${{ secrets.JIRA_TOKEN }}
+          jira_project: ${{ secrets.JIRA_PROJECT }}
+          jira_issue_type: 'Application Security Bug'
+          jira_open_transition: 'In Progress'
+          jira_close_transition: 'Done'
+          jira_open_status: 'Backlog,Selected for Development,In Progress'
+          jira_closed_status: 'Done'
+          params: --namespace=${{ github.repository_owner }} --repo-name=${{ github.event.repository.name }} --branch=${{ github.ref }} --cx-flow.filterSeverity --cx-flow.filterCategory --jira.priorities.High=High --jira.priorities.Medium=Medium --jira.priorities.Low=Low --jira.priorities.Informational=Lowest
+```
+
 ## <a name="IASTintegrations">CxFlow IAST Integration Tutorial</a>
 [Back to Table of Contents](#tableofcontents)
 ### <a name="IASTprerequisites">Prerequisites</a>
@@ -1514,6 +1643,7 @@ cx-flow:
     - Rally
     - ServiceNow
     - Sarif
+    -SonarQube
   branches:
     - develop
     - master
@@ -1524,6 +1654,9 @@ cx-flow:
   filter-cwe:
   filter-status:
   mitre-url: https://cwe.mitre.org/data/definitions/%s.html
+
+sonarqube:
+  file-path: C:\Checkmarx\SonarQube\cxSonarQube.json
 
 checkmarx:
   username: xxxxx
@@ -1659,4 +1792,74 @@ csv:
     - header: Similarity ID
       name: similarity-id
 ```
-	
+
+## <a name="SonarQubeIntegrations">CxFlow SonarQube Integration</a>
+[Back to Table of Contents](#tableofcontents)
+### <a name="SonarQubePrerequisites">Prerequisites</a>
+<br>The following must be set up:<br>
+
+* SonarQube Server (refer to SonarQube Setup Guide on [here](https://docs.sonarqube.org/latest/setup/install-server))
+
+* SonarQube Scanner (refer to SonarQube Scanner Installation on [here](https://docs.sonarqube.org/latest/setup/get-started-2-minutes))
+
+* Generate the Sonar Qube Issue Report by configuring bug tracker as SonarQube.
+
+### <a name="SonarQubeGeneralprocedures">General Procedure</a>
+<br>Configure cx-flow to generate SonarQube Report for SAST or SCA:<br>
+
+```
+  cx-flow:
+    bug-tracker: SonarQube
+    bug-tracker-impl:
+      -SonarQube
+```
+
+```
+  sonarqube:
+    file-path: C:\Checkmarx\SonarQube\cxSonarQube.json
+```
+
+<br> Upload the CxFlow Sonar Qube Report generated for SAST or SCA scan:<br>
+1. Set Sonar Scanner in Windows PATH Varaible.
+2. Edit {SONAR_SCANNER_HOME}\conf\sonar-scanner.properties for below properties:
+```
+    sonar.externalIssuesReportPaths={PATH_TO_CX_FLOW_SONAR_REPORT}
+```
+
+3. Run the below command from the folder where sonar-project.properties is located:
+```
+   sonar-scanner -X
+```
+
+### <a name="SonarQubeSeverityMapping">Severity Mapping</a>
+<br>Issue Severity Mapping for SAST and SCA:<br>
+
+| SAST / SCA Seveirty | SonarQube Severity | 
+|---------------------|--------------------|
+| `High`              | `CRITICAL`         |  
+| `Medium`            | `MAJOR`            | 
+| `Low`               | `MINOR`            |
+| `Information`       | `INFO`             |
+
+## <a name="branchedProject">CxSAST Branching Project</a>
+CxFlow supports creating branched project in CxSAST server from a project created from default branch of a repository, without incrementing the count of utilized licensed project in CxSAST. 
+
+### <a name="stepsForBranchProject">Steps to create branched project</a>
+* Set cx-branch option under checkmarx section in the application yml file to true.
+```
+  checkmarx:
+    ...
+    cx-branch:true  
+```
+
+* Create a PULL/PUSH event from a repository's default branch.
+[[Images/bp_db1.png|GitHubProject]]
+
+* This will create a licensed project in CxSAST with name `JavaVulnerabilityLabE-master` and the count of licensed project increases by 1.
+[[Images/CxSAST_default_project.png|ProjectInSAST]]
+[[Images/CxSAST_Licensed_Projects.png|LicensedProjectCount]]
+
+* Since cx-branch option is enabled and a project from default branch of a repository exists in CxSAST, When a PUSH event is generated from `feature-branch` a project with name `JavaVulnerabilityLabE-feature-branch` is created but the count of total licensed projects utilized in CxSAST server stays same.
+[[Images/fbranch.png|FeatureBranch]]
+[[Images/CxSAST_branch_project.png|ProjectInSAST]]
+[[Images/CxSAST_project_count.png|LicensedProjectCount]]

@@ -1,4 +1,5 @@
 * [Understanding the Data](#data)
+* [Understanding the result summary](#resultSummary)
 * [Jira](#jira)
   * [Label Prefix](#labelPrefix)
   * [Priorities](#priorities)
@@ -19,7 +20,7 @@
 * [NONE|WAIT](#none)
 
 ##  <a name="data">Understanding the Data</a>
-Checkmarx results are processed according to the following [scheme](https://checkmarx.atlassian.net/wiki/download/attachments/1276543114/cx.xsd?version=1&modificationDate=1557257271078&cacheVersion=1&api=v2).
+Checkmarx results are processed according to the following [scheme](https://raw.githubusercontent.com/checkmarx-ltd/cx-flow/develop/src/main/resources/samples/cx.xsd).
 
 The breakdown of the XML includes the following:
 
@@ -28,6 +29,33 @@ The breakdown of the XML includes the following:
 Issues are filtered based on the criteria found in the main configuration of CxFlow along with any particular overrides (severity, category, cwe, status).  From the XML structure, the **Source** identifier is the main tracking element.  The **Vulnerability+File** path is the key, and as additional line references are found for the same key, it is appended to the same issue reference.  See the development section for details on the ScanResults/Issue object structure.
 
 The best fix location would be a more appropriate value to track, which is currently unavailable.
+
+## <a name="resultSummary">Understanding the Result Summary</a>
+Once scan is finished and the results are retrieved then, cx-flow combines all issues in a single file that have the same category into a single issue, then the provided overrides for filters(severity,cwe,status,category,etc) are applied on those issues and a final list of Xissues is generated. Issues in the provided bug tracker are opened for the generated Xissues.
+
+**Example**</br>
+If **12 Medium level issues** were found in a file **src/authService.js** as described below
+
+| Sr. No. | Line Number | Issue Category                                                               |
+|---------|-------------|------------------------------------------------------------------------------|
+| 1       | 56 58       | Client HTML5 Insecure Storage\Path 1: -1(Clubbed with 5)                     |
+| 2       | 54 58       | Client HTML5 Insecure Storage\Path 2:                                        |
+| 3       | 165 167     | Client HTML5 Insecure Storage\Path 3: -1(Clubbed with 6)                     |
+| 4       | 161 167     | Client HTML5 Insecure Storage\Path 4:                                        |
+| 5       | 56 58       | Client HTML5 Insecure Storage\Path 4: -2(Clubbed with 1)                     |
+| 6       | 165 167     | Client HTML5 Insecure Storage\Path 4: -2(Clubbed with 3)                     |
+| 7       | 58 58       | Client HTML5 Insecure Storage\Path 7:                                        |
+| 8       | 167 167     | Client HTML5 Insecure Storage\Path 8:                                        |
+| 9       | 58 58       | Client HTML5 Store Sensitive data In Web Storage\Path 1: -2(Clubbed with 10) |
+| 10      | 58 58       | Client HTML5 Store Sensitive data In Web Storage\Path 2: -1(Clubbed with 9)  |
+| 11      | 167 167     | Client HTML5 Store Sensitive data In Web Storage\Path 3: -2(Clubbed with 12) |
+| 12      | 167 167     | Client HTML5 Store Sensitive data In Web Storage\Path 4: -1(Clubbed with 11) |
+
+Issues **[1]**, and **[5]** are clubbed as the category of the issue and the filename is same. Similarly, issues **[3]** and **[6]**, **[9]** and **[10]**, and **[11]** and **[12]** are clubbed. 
+
+Since the issues are clubbed the total count of **12 Medium issues** is now converted to **8 Medium issues**.
+
+The **Cx-SAST/ Cx-SCA summary** in a PR displays all the unfiltered issues which are present in the project. While the Violation summary displays all the filtered issues.
 
 ## <a name="jira">Jira</a>
 Jira has the most complex configuration use case as it supports a variety of custom fields, custom workflows and custom transitions.
@@ -80,6 +108,46 @@ jira:
        jira-field-name: LOC
        jira-field-type: label
        jira-default-value: XXXXX
+    - type: sca-results
+      name: package-name
+      jira-field-name: Package Name
+      jira-field-type: label
+    - type: sca-results
+      name: current-version
+      jira-field-name: Current Version
+      jira-field-type: label
+    - type: sca-results
+      name: fixed-version
+      jira-field-name: Fixed Version
+      jira-field-type: label
+    - type: sca-results
+      name: newest-version
+      jira-field-name: Newest Version
+      jira-field-type: label
+    - type: sca-results
+      name: locations
+      jira-field-name: Locations
+      jira-field-type: label
+    - type: sca-results
+      name: risk-score
+      jira-field-name: Risk Score
+      jira-field-type: label
+    - type: sca-results
+      name: dev-dependency
+      jira-field-name: Development
+      jira-field-type: single-select
+    - type: sca-results
+      name: direct-dependency
+      jira-field-name: Direct
+      jira-field-type: single-select
+    - type: sca-results
+      name: outdated
+      jira-field-name: Outdated
+      jira-field-type: single-select
+    - type: sca-results
+      name: violates-policy
+      jira-field-name: Violates Policy
+      jira-field-type: single-select
 ```
 
 ### <a name="labelPrefix">Label Prefix</a>
@@ -180,6 +248,29 @@ The sast-issue-summary-format and sast-issue-summary-branch-format properties ca
 **[VULNERABILTY]** → The vulnerability
 
 The default Jira issue summary format (for CxSAST issues) is `[PREFIX][VULNERABILITY] @ [FILENAME][POSTFIX]` (`[PREFIX][VULNERABILITY] @ [FILENAME] [[BRANCH]][POSTFIX]` if the `--branch` command line option has been used).
+
+### <a name="issueSummaryFormat">Jira Issue Handling for Scan Mode</a>
+* Jira Issue will be created with Label as SAST scanner and SCA scanner after the scan.
+* Issue will be filtered on the bases of type of scan (SCA or SAST) and issue will be Update/Open/Close for which scan is initiated that project.
+* For scan initiated for both SCA and SAST then issues for both type of scan will be created or updated for that project.If User re-run scan for any one type 
+ either SCA or SAST for same project id, then Issue will be updated for that scan type and Issues for other scan type(created before re-run) will 
+ not be impacted. 
+
+**Description**
+
+1. Run the SAST and SCA scan the CLI mode.
+```
+ $ java -jar .\cx-flow-1.6.29.jar --spring.config.location="application.yml" --scan --f=.\TestProj  --cx-flow.enabled-vulnerability-scanners="sca,sast" --cx-team=CxServer --cx-project=TestProj--app=TestProj --cx-flow.bug-tracker=JIRA --logging.level.com.checkmarx.flow.custom=debug --logging.level.com.checkmarx.flow.service=debug --logging.level.com.checkmarx.flow.utils=debug --logging.level.com.checkmarx.sdk.service=debug
+``` 
+2. Run the SCA or SAST scan from CLI mode.
+```
+ $ java -jar .\cx-flow-1.6.29.jar --spring.config.location="application.yml" --scan --f=.\TestProj  --cx-flow.enabled-vulnerability-scanners="sca" --cx-team=CxServer --cx-project=TestProj--app=TestProj --cx-flow.bug-tracker=JIRA --logging.level.com.checkmarx.flow.custom=debug --logging.level.com.checkmarx.flow.service=debug --logging.level.com.checkmarx.flow.utils=debug --logging.level.com.checkmarx.sdk.service=debug
+``` 
+```
+ $ java -jar .\cx-flow-1.6.29.jar --spring.config.location="application.yml" --scan --f=.\TestProj  --cx-flow.enabled-vulnerability-scanners="sast" --cx-team=CxServer --cx-project=TestProj--app=TestProj --cx-flow.bug-tracker=JIRA --logging.level.com.checkmarx.flow.custom=debug --logging.level.com.checkmarx.flow.service=debug --logging.level.com.checkmarx.flow.utils=debug --logging.level.com.checkmarx.sdk.service=debug
+``` 
+
+Issue created in Step 1 will not be closed in Sept 2, because issue identified in scan will be compared with issue already in Jira for that Project based on type of Scan (SAST, SCA or both).
 
 ## <a name="custom">Custom Bug Trackers</a>
 Refer to the [development section](https://github.com/checkmarx-ltd/cx-flow/wiki/Development) for the implementation approach.
@@ -321,14 +412,23 @@ cx-flow:
 ```
 
 ## <a name="cxxml">CxXML</a>
-The XML bug-tracker (defined as CxXml) is useful, if you want to retrieve the latest scan results per project (batch mode) from Checkmarx per project, Team, or the entire instance.  This is the original XML report provided by Checkmarx.  
+The XML bug-tracker (defined as CxXml) is useful, if you want to retrieve the latest scan results per project (batch mode) from Checkmarx per project, Team, or the entire instance. This is the original XML report provided by Checkmarx. When using CxXML with both CxSAST and CxSCA scanners enabled, two seprate reports will be generated, one for CxSAST report and one for CxSCA report.
 
-**Note**: The Checkmarx config block must specify `preserve-xml` as `true` for this feedback type.  *Only available for SAST 8.x|9.x*
+CxSCA currently does not support `--batch` mode, but retrieving latest scan for a particular project (project mode) is still possible.
+
+When both the scanners are enabled it is a known issue that duplicate CxSAST reports are generated.
+
+**Note**: The Checkmarx,Sca config blocks must specify `preserve-xml` as `true` for this feedback type.  
 ```
 checkmarx:
    ...
    ...
      preserve-xml: true
+     
+sca:
+  ....
+  ....
+  preserve-xml:true     
 cx-xml:
    file-name-format: "[NAMESPACE]-[REPO]-[BRANCH]-[TIME].xml"
    data-folder: "C:\\tmp"

@@ -7,6 +7,7 @@ import com.atlassian.jira.rest.client.api.domain.input.FieldInput;
 import com.atlassian.jira.rest.client.api.domain.input.IssueInputBuilder;
 import com.atlassian.jira.rest.client.api.domain.input.TransitionInput;
 import com.atlassian.jira.rest.client.internal.async.CustomAsynchronousJiraRestClientFactory;
+import com.checkmarx.flow.config.CliMode;
 import com.checkmarx.flow.config.FlowProperties;
 import com.checkmarx.flow.config.JiraProperties;
 import com.checkmarx.flow.constants.FlowConstants;
@@ -22,6 +23,7 @@ import com.checkmarx.flow.exception.MachinaRuntimeException;
 import com.checkmarx.flow.utils.HTMLHelper;
 import com.checkmarx.flow.utils.ScanUtils;
 import com.checkmarx.sdk.dto.ScanResults;
+import com.checkmarx.sdk.dto.sca.Sca;
 import com.google.common.collect.ImmutableMap;
 import io.atlassian.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
@@ -56,6 +58,8 @@ public class JiraService {
     private static final String NAME_FIELD_TYPE = "name";
     private static final String CHILD_FIELD_TYPE = "child";
     private static final String ACCOUNT_ID = "accountId";
+    private static final String JIRA_ISSUE_LABEL_SCA = "scanner:SCA";
+    private static final String JIRA_ISSUE_LABEL_SAST = "scanner:SAST";
     private static final String CASCADE_PARENT_CHILD_DELIMITER = ";";
     private static final int MAX_RESULTS_ALLOWED = 1000000;
     private static final String SEARCH_ASSIGNABLE_USER = "%s/rest/api/latest/user/assignable/search?project={projectKey}&query={assignee}";
@@ -172,7 +176,7 @@ public class JiraService {
         return jiraProperties.getStatusCategoryOpenName().contains(status.getStatusCategory().getName());
     }
 
-    private List<Issue> getIssues(ScanRequest request) {
+    private List<Issue> getIssues(ScanRequest request,String scannerFilter) {
         log.info("Executing getIssues API call");
         List<Issue> issues = new ArrayList<>();
         String jql;
@@ -221,6 +225,14 @@ public class JiraService {
             log.error("Namespace/Repo/Branch or App must be provided in order to properly track ");
             throw new MachinaRuntimeException();
         }
+        if(!StringUtils.isEmpty(scannerFilter)){
+            jql = jql.concat(String.format(" and \"%s\" in (%s)",
+                                    jiraProperties.getLabelTracker(),
+                                    scannerFilter
+                                )
+                            );
+        }
+
         log.debug("jql query: {}", jql);
         HashSet<String> fields = new HashSet<>();
         Collections.addAll(fields, "key", "project", "issuetype", "summary", LABEL_FIELD_TYPE, "created", "updated", "status");
@@ -343,6 +355,11 @@ public class JiraService {
                 labels.add(request.getProduct().getProduct());
                 labels.add(jiraProperties.getAppLabelPrefix().concat(":").concat(application));
             }
+            if (null != scaDetails) { 
+                labels.add(JIRA_ISSUE_LABEL_SCA);
+            }else{
+                labels.add(JIRA_ISSUE_LABEL_SAST);
+            }
             log.debug("Adding tracker labels: {} - {}", jiraProperties.getLabelTracker(), labels);
             if (!jiraProperties.getLabelTracker().equals(LABEL_FIELD_TYPE)) {
                 String customField = getCustomFieldByName(projectKey, bugTracker.getIssueType(), jiraProperties.getLabelTracker());
@@ -463,7 +480,8 @@ public class JiraService {
         for (com.checkmarx.flow.dto.Field f : bugTracker.getFields()) {
 
             String customField = getCustomFieldByName(projectKey, issueTypeStr, f.getJiraFieldName());
-            String value;
+            String value = "";
+            String fieldName;
             if (update && f.isSkipUpdate()) {
                 log.debug("Skip update to field {}", f.getName());
                 continue;
@@ -496,12 +514,67 @@ public class JiraService {
                             value = "";
                         }
                         break;
+                    case "sca-results":
+                        if(issue.getScaDetails() == null){
+                            log.debug("Sca details not available");
+                            break;
+                        }
+                        fieldName = f.getName();
+                        switch (fieldName) {
+                            case "package-name":
+                                log.debug("package-name: {}", issue.getScaDetails().get(0).getVulnerabilityPackage().getId());
+                                value = issue.getScaDetails().get(0).getVulnerabilityPackage().getId();
+                                break;
+                            case "current-version":
+                                log.debug("current-version: {}", issue.getScaDetails().get(0).getVulnerabilityPackage().getVersion());
+                                value = issue.getScaDetails().get(0).getVulnerabilityPackage().getVersion();
+                                break;
+                            case "fixed-version":
+                                log.debug("fixed-version: {}", issue.getScaDetails().get(0).getFinding().getFixResolutionText());
+                                value = issue.getScaDetails().get(0).getFinding().getFixResolutionText();
+                                break;
+                            case "newest-version":
+                                log.debug(issue.getScaDetails().get(0).getVulnerabilityPackage().getNewestVersion());
+                                value = issue.getScaDetails().get(0).getVulnerabilityPackage().getNewestVersion();
+                                break;
+                            case "locations":
+                                List<String> locations = issue.getScaDetails().get(0).getVulnerabilityPackage().getLocations();
+                                String location = null;
+                                for (String l: locations
+                                     ) {
+                                    location = l + ",";
+                                }
+                                log.debug("locations: {}", location);
+                                value = location.substring(0,location.length()-1);
+                                break;
+                            case "dev-dependency":
+                                log.debug("dev-dependency: {}", issue.getScaDetails().get(0).getVulnerabilityPackage().isDevelopment());
+                                value = String.valueOf(issue.getScaDetails().get(0).getVulnerabilityPackage().isDevelopment()).toUpperCase();
+                                break;
+                            case "direct-dependency":
+                                log.debug("direct-dependency: {}", issue.getScaDetails().get(0).getVulnerabilityPackage().isDirectDependency());
+                                value = String.valueOf(issue.getScaDetails().get(0).getVulnerabilityPackage().isDirectDependency()).toUpperCase();
+                                break;
+                            case "risk-score":
+                                log.debug("risk score: {}", issue.getScaDetails().get(0).getVulnerabilityPackage().getRiskScore());
+                                value = String.valueOf(issue.getScaDetails().get(0).getVulnerabilityPackage().getRiskScore());
+                                break;
+                            case "outdated":
+                                log.debug("outdated: {}", issue.getScaDetails().get(0).getVulnerabilityPackage().isOutdated());
+                                value = String.valueOf(issue.getScaDetails().get(0).getVulnerabilityPackage().isOutdated()).toUpperCase();
+                                break;
+                            case "violates-policy":
+                                log.debug("Violates-Policy: {}", issue.getScaDetails().get(0).getFinding().isViolatingPolicy());
+                                value = String.valueOf(issue.getScaDetails().get(0).getFinding().isViolatingPolicy()).toUpperCase();
+
+                        }
+                        break;
                     case "static":
                         log.debug("Static value {} - {}", f.getName(), f.getJiraDefaultValue());
                         value = f.getJiraDefaultValue();
                         break;
                     default:  //result
-                        String fieldName = f.getName();
+                        fieldName = f.getName();
                         if (fieldName == null) {
                             log.warn("Field name not supplied for custom field: {}. Skipping.", customField);
                             /* there is no default, move on to the next field */
@@ -534,8 +607,13 @@ public class JiraService {
                                 value = request.getBranch();
                                 break;
                             case "severity":
-                                log.debug("severity: {}", issue.getSeverity());
-                                value = ScanUtils.toProperCase(issue.getSeverity());
+                                if(issue.getScaDetails() != null){
+                                    log.debug("severity: {}", issue.getScaDetails().get(0).getFinding().getSeverity());
+                                    value = ScanUtils.toProperCase(String.valueOf(issue.getScaDetails().get(0).getFinding().getSeverity()));
+                                }else{
+                                    log.debug("severity: {}", issue.getSeverity());
+                                    value = ScanUtils.toProperCase(issue.getSeverity());
+                                }
                                 break;
                             case "category":
                                 log.debug("category: {}", issue.getVulnerability());
@@ -546,8 +624,13 @@ public class JiraService {
                                 value = issue.getCwe();
                                 break;
                             case "cve":
-                                log.debug("cve: {}", issue.getCve());
-                                value = issue.getCve();
+                                if(issue.getScaDetails() != null){
+                                    log.debug("cve: {}", issue.getScaDetails().get(0).getFinding().getId());
+                                    value = issue.getScaDetails().get(0).getFinding().getId();
+                                }else{
+                                    log.debug("cve: {}", issue.getCve());
+                                    value = issue.getCve();
+                                }
                                 break;
                             case "system-date":
                                 DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -607,8 +690,13 @@ public class JiraService {
                                 value = request.getSite();
                                 break;
                             case "issue-link":
-                                log.debug("issue-link: {}", issue.getLink());
-                                value = issue.getLink();
+                                if(issue.getScaDetails() != null){
+                                    log.debug("issue-link: {}", issue.getScaDetails().get(0).getVulnerabilityLink());
+                                    value = issue.getScaDetails().get(0).getVulnerabilityLink();
+                                }else{
+                                    log.debug("issue-link: {}", issue.getLink());
+                                    value = issue.getLink();
+                                }
                                 break;
                             case "filename":
                                 log.debug("filename: {}", issue.getFilename());
@@ -1218,6 +1306,20 @@ public class JiraService {
         List<String> newIssues = new ArrayList<>();
         List<String> updatedIssues = new ArrayList<>();
         List<String> closedIssues = new ArrayList<>();
+        String filterScanner = "";
+
+        if(CliMode.SCAN.equals(request.getCliMode())){
+            if (null != results.getScaResults()) {
+                filterScanner=JIRA_ISSUE_LABEL_SCA;
+            }
+            if(null != results.getXIssues()){
+                if(filterScanner.isEmpty()){
+                    filterScanner=JIRA_ISSUE_LABEL_SAST;
+                }else{
+                    filterScanner=filterScanner + "," + JIRA_ISSUE_LABEL_SAST;
+                }
+            }
+        }
 
         codeBashingService.createLessonsMap();
         getAndModifyRequestApplication(request);
@@ -1233,7 +1335,7 @@ public class JiraService {
             bugTracker = parent.getBugTracker();
             bugTracker.setProjectKey(parentUrl);
             parent.setBugTracker(bugTracker);
-            issuesParent = this.getIssues(parent);
+            issuesParent = this.getIssues(parent,filterScanner);
             if (grandParentUrl.length() == 0) {
                 log.info("Grandparent field is empty");
                 issuesGrandParent = null;
@@ -1242,7 +1344,7 @@ public class JiraService {
                 bugTrackerGrandParenet = grandparent.getBugTracker();
                 bugTrackerGrandParenet.setProjectKey(grandParentUrl);
                 grandparent.setBugTracker(bugTrackerGrandParenet);
-                issuesGrandParent = this.getIssues(grandparent);
+                issuesGrandParent = this.getIssues(grandparent,filterScanner);
             }
         } else {
             issuesParent = null;
@@ -1253,7 +1355,7 @@ public class JiraService {
 
         map = this.getIssueMap(results, request);
         setMapWithScanResults(map, nonPublishedScanResultsMap);
-        jiraMap = this.getJiraIssueMap(this.getIssues(request));
+        jiraMap = this.getJiraIssueMap(this.getIssues(request,filterScanner));
 
 
         for (Map.Entry<String, ScanResults.XIssue> xIssue : map.entrySet()) {

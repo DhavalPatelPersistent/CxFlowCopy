@@ -9,6 +9,9 @@
   * [Break build](#break)
   * [Override SAST project setting](#override)
   * [Create Branched Project](#branchProject)
+  * [Scan Queuing and Scan Queuing Timeout](#scanQueuing)
+  * [Scan Timeout and Scan polling](#scanTimeoutAndscanPolling)
+  * [Report Timeout and Report polling](#reportTimeoutAndreportPolling)
 * [WebHook Configuration](#webhook)
   * [WebHook URL Parameters - Code](#code)
   * [WebHook URL Override Parameters - Details](#details)
@@ -121,7 +124,9 @@ checkmarx:
     "5": "SUSPICIOUS"
   post-action-postback-id: 123456
   settings-override: true #default false if not provide
-    cx-branch: false
+  cx-branch: false
+  scan-queuing: true
+  scan-queuing-timeout: 720 # Webhook and --scan command line only, number of minutes
 
 github:
   webhook-token: XXXXX
@@ -310,6 +315,10 @@ cx-flow:
   preserve-project-name: false
   http-connection-timeout: xxx # milliseconds - default 30000
   http-read-timeout: xxx # milliseconds - default 120000
+  scanTimeout: 120
+  scanPolling: 20000
+  reportTimeout: 300000
+  reportPolling: 5000
   mail:
      host: smtp.gmail.com
      port: 587
@@ -349,8 +358,33 @@ cx-flow:
 | `profile-config`          | CxProfile.json        | No       | Yes     | No           | The file that contains the profile configuration mapping. |
 | `scan-resubmit`           | false                 | No       | Yes     | No           | When **True**: If a scan is active for the same project, CxFlow cancels the active scan and submits a new scan. When **False**: If a scan is active for the same project, CxFlow does not submit a new scan. |
 | `preserve-project-name`   | false                 | No       | Yes     | Yes          | When **False**: The project name will be the repository name after normalization (i.e. Front-End-dev). Legal characters are: `a-z`, `A-Z`, `0-9`, `-`, `_`, `.`. All other characters will be replaced in the normalization process with "-". <br/> When **True**: The project name will be the exact project name inputted without normalization (i.e. Front End-dev). <br/> **For attention:** <br/> 1. Not all scanners allow project names with invalid characters.<br/> 2. The preserve-project-name parameter is also effective for project name coming from config-as-code. |
+| `scanTimeout`             | 120                   | No       | Yes     | Yes          | The amount of time (in minutes) for which cx-flow will wait for CxSAST scan to finish.If scan is not completed within 120(in minutes) then it will gives Timeout exceeded during scan as error messase.|
+| `scanPolling`             | 20000                 | No       | Yes     | Yes          | The amount of time (in milliseconds) in which cx-flow pings CxSAST server to get the status of the scan (i.e Queued, Finished or Failed). |
+| `reportTimeout`           | 300000                | No       | Yes     | Yes          | The amount of time (in milliseconds) for which cx-flow will wait for CxSAST to generate scan report.If report is not generated within  300000(in miliseconds)it will through Timeout exceeded during report generation as error message. |
+| `reportPolling`           | 5000                  | No       | Yes     | Yes          | The amount of time (in milliseconds) in which cx-flow pings CxSAST server to get the status of the report. |
 
 No* = Default is applied
+
+### <a name="scanTimeoutAndscanPolling"> Scan Timeout and Scan Polling</a>
+ The amount of time (in minutes) for which cx-flow will wait for CxSAST scan to finish.If scan is not completed within 120(in minutes) then it will gives Timeout exceeded during scan as error messase.The default value of scanTimeout **120** minutes.
+ The amount of time (in milliseconds) in which cx-flow pings CxSAST server to get the status of the scan (i.e Queued, Finished or Failed).The default value of scanPolling **20000** miliseconds.
+```yaml
+cx-flow:
+  ...
+  scanTimeout: 120 #Amount of time in minutes
+  scanPolling: 20000 #Amount of time in miliseconds
+```
+
+### <a name="reportTimeoutAndreportPolling"> Report Timeout and Report Polling</a>
+The amount of time (in milliseconds) for which cx-flow will wait for CxSAST to generate scan report.If report is not generated within  300000(in miliseconds)it will through Timeout exceeded during report generation as error message.The default value of reportTimeout **30000** miliseconds.
+The amount of time (in milliseconds) in which cx-flow pings CxSAST server to get the status of the report.The default value of reportPolling **5000** miliseconds.
+```yaml
+cx-flow:
+  ...
+  reportTimeout: 300000 #Amount of time in miliseconds
+  reportPolling: 5000 #Amount of time in miliseconds
+```
+
 
 #### <a name="filtering">E-Mail notifications</a>
 
@@ -461,6 +495,8 @@ The configuration can be set or overridden at execution time using the command l
 | `post-action-postback-id` |                       | No       | Yes     | Yes      | Sets the SAST project's post-scan action to use the post-scan action with the provided Id defined in SAST.If not provided, the project does not get configured to use a post-scan action. |
 | `settings-override`       |                       | No       | Yes     | Yes      | Defaults value false, if set to true the projects settings are re-written/overridden when each SAST scan is invoked from CxFlow |
 | `cx-branch` | false | No | Yes | Yes | A flag to enable branching of projects in CxSAST. |
+| `scan-queuing` | false | No | Yes | Yes | A flag to enable queuing of scan events. |
+| `scan-queuing-timeout` | 720 | No | Yes | Yes | The amount of time (in minutes) for which cx-flow will keep a scan event data in its queue before sending to CxSAST, when all the available concurrent scans in CxSAST are in use. | 
 
 No* = Default is applied
 
@@ -485,6 +521,8 @@ checkmarx:
    exclude-files: "*.tst,*.json"
    exclude-folders: ".git,test"
    cx-branch: false
+   scan-queuing: true
+   scan-queuing-timeout: 720 # Webhook and --scan command line only, number of minutes  
 ```
 **Note:**
 * Make sure to include `version: 9.0` (or higher) and `scope: access_control_api sast_rest_api`
@@ -513,9 +551,18 @@ checkmarx
 ### <a name="branchProject">Branched Project</a>
 A branched project is a child of a base project in CxSAST. Upon initiating a scan from the default branch of a repository, CxSAST creates a base project in the server with name `RepoName-defaultBranchName` and any subsequent scans from the branches of that repository will create child projects off of it with name `RepoName-currentBranchName`. The project count in CxSAST does not increase when a branched project is added. Branching of projects can be enabled by setting the `cx-branch` property to `true`.
 ```yaml
-checkmarx
+checkmarx:
   ...
   cx-branch: true #default false if not provided
+```
+
+### <a name="scanQueuing"> Scan Queuing and Scan Queuing Timeout</a>
+If the number of concurrent scans which can run on CxSAST server is all utilized, then enabling `scan-queuing` will allow CxFlow to keep the event of the scan within itself and let the existing scans finish before sending the new scan event to CxSAST. Cx-flow keeps events with itself for a number of minutes, specified by the `scan-queuing-timeout` parameter, with a default value of **120** minutes.
+```yaml
+checkmarx:
+  ...
+  scan-queuing: true
+  scan-queuing-timeout: 720 #Amount of time in minutes
 ```
 
 ## <a name="webhook">WebHook Configuration</a>

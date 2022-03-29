@@ -400,11 +400,23 @@ public class CxFlowRunner implements ApplicationRunner {
                     }
                     cxOsaParse(request, f, libs);
                 } else { //SAST
+                    List<String> enabledScanners = flowProperties.getEnabledVulnerabilityScanners();
                     if (args.containsOption("offline")) {
                         cxProperties.setOffline(true);
                     }
                     log.info("Processing Checkmarx result file {}", file);
 
+                    if((bugType.equals(BugTracker.Type.CUSTOM))){
+                        if(request.getBugTracker().getCustomBean().equalsIgnoreCase("CxXml")){
+                            log.error("The CxXml bugtracker is not support for parse mode{}");
+                            exit(ExitCode.BUILD_INTERRUPTED);
+                        }
+                    }
+
+                    if(enabledScanners.contains("sast")&&enabledScanners.contains("sca")){
+                        log.error("At a time only single scanner type is supported for parse mode implementation{}");
+                        exit(ExitCode.BUILD_INTERRUPTED);
+                    }
                     cxParse(request, f);
                 }
             } else if (args.containsOption(BATCH_OPTION)) {
@@ -415,9 +427,11 @@ public class CxFlowRunner implements ApplicationRunner {
                     log.error("cx-project must be provided when --project option is used");
                     exit(ExitCode.ARGUMENT_NOT_PROVIDED);
                 }
+                request.setCliMode(CliMode.PROJECT);
                 publishLatestScanResults(request);
             } else if (args.containsOption("scan") || args.containsOption(IAST_OPTION)) {
                 log.info("Executing scan process");
+                request.setCliMode(CliMode.SCAN);
                 //GitHub Scan with Git Clone
                 if (args.containsOption("github")) {
                     repoUrl = getNonEmptyRepoUrl(namespace, repoName, repoUrl, gitHubProperties.getGitUri(namespace, repoName));

@@ -1,0 +1,41 @@
+{ "issues": [
+    {
+      "engineId": "test",
+      "ruleId": "\"@Deprecated\" code should not be used",
+      "severity":"MINOR",
+      "type":"CODE_SMELL",
+      "primaryLocation": {
+        "message": "fully-fleshed issue",
+        "filePath": "build.gradle",
+        "textRange": {
+          "startLine": 50,
+          "endLine": 50,
+          "startColumn": 9,
+          "endColumn": 14
+        }
+      },
+      "effortMinutes": 90,
+      "secondaryLocations": [
+        {
+          "message": "cross-file 2ndary location",
+          "filePath": "src/main/java/com/checkmarx/flow/controller/ADOController.java",
+          "textRange": {
+            "startLine": 60,
+            "endLine": 60,
+            "startColumn": 6,
+            "endColumn": 38
+          }
+        }
+      ]
+    },
+    {
+      "engineId": "test",
+      "ruleId": "\"@Deprecated\" code should not be used",
+      "severity": "MINOR",
+      "type": "CODE_SMELL",
+      "primaryLocation": {
+        "message": "minimal issue raised at file level",
+        "filePath": "src/main/java/com/checkmarx/flow/controller/ADOController.java"
+      }
+    }
+]}
