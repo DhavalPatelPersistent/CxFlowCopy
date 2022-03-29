@@ -346,7 +346,7 @@ jobs:
           preset: Checkmarx Express
           report-file: checkmarx.json
           project: fdr-ui
-          team: CxServer/Service Providers/DHCS/MES
+          team: /CxServer/SP/ANZ/CBA-GH-POC
           version: "9.2"
           scan-timeout: 30
       - store_artifacts:
