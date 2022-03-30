@@ -348,7 +348,7 @@ jobs:
           project: fdr-ui
           team: /CxServer/SP/ANZ/CBA-GH-POC
           version: "9.2"
-          no-output-timeout: "50"
+          no-output-timeout: "50m"
       - store_artifacts:
           path: checkmarx.json
 
