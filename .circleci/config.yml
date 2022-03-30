@@ -5,7 +5,7 @@ version: 2.1
 orbs:
   increment-tag: dhcs/increment-tag@0.0.82
   slack: circleci/slack@3.4.2
-  cxflow: checkmarx-ts/cxflow@1.0.4
+  cxflow: checkmarx-ts/cxflow@1.0.6
   whitesource-scan: dhcs/whitesource-scan@0.0.32
 
 env_vars: &env_vars
@@ -348,7 +348,7 @@ jobs:
           project: fdr-ui
           team: /CxServer/SP/ANZ/CBA-GH-POC
           version: "9.2"
-          scan-timeout: 30
+          no-output-timeout: "50"
       - store_artifacts:
           path: checkmarx.json
 
